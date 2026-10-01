@@ -5,10 +5,11 @@ The dataset's listed price is a single snapshot and is sometimes wrong (third-pa
 reseller markups, e.g. a ~$20 Sony earbud listed at $803). For each product Claude sees
 the title, brand, category, listed price and a few reviews that mention price, and returns:
 
-  verdict        plausible / suspect / unsure
-                 suspect = the listed price is clearly far from what this product
-                 normally sold for new, so its band label is probably wrong
-  typical_low/high  Claude's estimate of the normal new price range (USD)
+  typical_low/high  Claude's estimate of the normal price range (USD), null if unknown
+  verdict        set in code from the estimate: suspect if the listed price is more than
+                 SUSPECT_RATIO x typical_high or under typical_low / SUSPECT_RATIO;
+                 unsure if there is no estimate; otherwise plausible.
+                 Claude's own verdict is kept as model_verdict for comparison.
   is_headphone   false for items that aren't headphones or earbuds (cables, terminators, beanies)
   reason         one sentence
 
@@ -24,7 +25,7 @@ Workflow (run from the project folder, environment active, API key set):
   3. Rebuild the output and print the summary any time:
        python pipeline\\04_check_prices.py summary
 
-Resumable: products already checked are skipped. Outputs in data/processed/:
+Resumable: products already checked with the current PROMPT_VERSION are skipped. Outputs in data/processed/:
   price_checks.jsonl     raw log, one line per checked product (the source of truth)
   price_checks.parquet   one row per product, latest check wins
 """
@@ -48,7 +49,10 @@ REVIEW_SNIPPETS = 3        # price-mentioning reviews shown per product
 SNIPPET_CHARS = 300
 # USD per million tokens, Claude Haiku 4.5 (checked 2026-09-30)
 PRICE_STANDARD = (1.00, 5.00)
-PROMPT_VERSION = "v1"
+PROMPT_VERSION = "v2"
+# Suspect = listed price more than this multiple above (or below) Claude's typical range.
+# Enforced in code: in the v1 pilot Claude flagged prices only ~1.1x its own range.
+SUSPECT_RATIO = 2.0
 
 # Known problem listings from the project log, always included in the pilot
 PILOT_KNOWN = [
@@ -67,24 +71,26 @@ SYSTEM = """You check whether Amazon headphone listings have a believable price,
 that groups products into price bands. The listed price is a single snapshot from around 2023 and is
 sometimes wrong, mostly because a third-party reseller listed a cheap product at a large markup.
 
-For each product judge whether the LISTED price is in line with what this product normally sold for
-NEW at mainstream retail (around its release through 2023).
-- plausible: the listed price is within the normal range, including ordinary sales, list prices
-  and the normal premium of a flagship model.
-- suspect: the listed price is clearly far from the normal new price, roughly more than double or less
-  than half, so the product would land in the wrong price band. Typical case: a $20 earbud listed at $300+.
-- unsure: you don't recognize the product and nothing in the listing or reviews tells you its price.
-  Do not guess suspect for obscure brands just because the price seems high or low.
+For each product estimate typical_low and typical_high: the range this exact product normally sold for
+at mainstream retail (around its release through 2023), in USD, including ordinary sales and list prices.
+If the listing is renewed, refurbished or used, estimate the normal price in that condition, not new.
+Give null for both if you don't recognize the product and nothing in the listing or reviews tells you
+its price; do not invent a range for an obscure brand.
 
-Use the reviews as evidence: reviewers often say what they paid ("got these for $20 on sale").
-One reviewer's sale price is weak evidence; several reviewers far from the listing, or a well-known
-model with a well-known price, is strong evidence.
+Evidence from reviews: only prices a reviewer says they paid or saw count ("got these for $20 on sale",
+"list price is $150"). Opinions about what the product is worth ("overpriced", "should be a $10 item",
+"not worth $100") are value judgments, not evidence of the price; ignore them for the estimate.
+One reviewer's sale price is weak evidence; several reviewers, or a well-known model with a
+well-known price, is strong evidence.
 
-Also say whether the product is actually headphones or earbuds (including headsets and kids' headphones).
-Cables, adapters, cases, ear pads, cleaning kits, speakers, beanies and car stereos are not.
+Also give verdict: plausible if the listed price fits your range, suspect if it is clearly far outside
+it (a $20 earbud listed at $300+), unsure if you have no range.
 
-Give typical_low and typical_high as your estimate of the normal new price in USD (null if unsure),
-and a one-sentence reason. Check every product_id you are given, exactly once."""
+Separately, say whether the product is actually headphones or earbuds (including headsets and kids'
+headphones). Cables, adapters, connectors, cases, ear pads, cleaning kits, speakers, beanies and car
+stereos are not. Judge the price of a non-headphone item the same way, as that item.
+
+Give a one-sentence reason. Check every product_id you are given, exactly once."""
 
 TOOL = {
     "name": "record_checks",
@@ -148,7 +154,9 @@ def checked_ids() -> set[str]:
     with open(CHECKS_LOG, encoding="utf-8") as f:
         for line in f:
             try:
-                ids.add(json.loads(line)["parent_asin"])
+                r = json.loads(line)
+                if r.get("prompt") == PROMPT_VERSION:
+                    ids.add(r["parent_asin"])
             except (json.JSONDecodeError, KeyError):
                 pass
     return ids
@@ -179,6 +187,15 @@ def build_params(chunk: pd.DataFrame) -> dict:
     }
 
 
+def apply_ratio(price: float, low, high) -> str:
+    """The suspect rule, enforced in code rather than left to the prompt."""
+    if not isinstance(low, (int, float)) or not isinstance(high, (int, float)) or low <= 0 or high < low:
+        return "unsure"
+    if price > high * SUSPECT_RATIO or price < low / SUSPECT_RATIO:
+        return "suspect"
+    return "plausible"
+
+
 def parse_message(message, chunk: pd.DataFrame) -> list[dict]:
     """Pull valid results for the expected products out of a Claude response."""
     prices = dict(zip(chunk["parent_asin"], chunk["price"]))
@@ -192,9 +209,11 @@ def parse_message(message, chunk: pd.DataFrame) -> list[dict]:
                 continue
             if item.get("verdict") not in ("plausible", "suspect", "unsure"):
                 continue
+            low, high = item.get("typical_low"), item.get("typical_high")
             out.append({"parent_asin": pid, "listed_price": prices[pid],
-                        "verdict": item["verdict"],
-                        "typical_low": item.get("typical_low"), "typical_high": item.get("typical_high"),
+                        "verdict": apply_ratio(prices[pid], low, high),
+                        "model_verdict": item["verdict"],
+                        "typical_low": low, "typical_high": high,
                         "is_headphone": bool(item.get("is_headphone", True)),
                         "reason": str(item.get("reason", ""))})
             seen.add(pid)
@@ -252,6 +271,9 @@ def finalize(show_ids: set[str] | None = None) -> None:
     print(pd.crosstab(df["band"], df["verdict"], margins=True)
           .reindex([b for b, _, _ in BANDS] + ["All"]).fillna(0).astype(int).to_string())
     print(f"\nNot headphones: {(~df['is_headphone']).sum()}")
+    if "model_verdict" in df:
+        changed = df[df["model_verdict"].notna() & (df["model_verdict"] != df["verdict"])]
+        print(f"Verdicts changed by the {SUSPECT_RATIO:g}x rule: {len(changed)}")
 
     flagged = df[(df["verdict"] == "suspect") | ~df["is_headphone"]]
     if show_ids is not None:
@@ -261,7 +283,9 @@ def finalize(show_ids: set[str] | None = None) -> None:
         typical = (f"${r.typical_low:,.0f}-{r.typical_high:,.0f}"
                    if pd.notna(r.typical_low) and pd.notna(r.typical_high) else "?")
         tag = "" if r.is_headphone else "  [NOT HEADPHONE]"
-        print(f"\n  {r.verdict.upper():9} ${r.price:,.2f} (typical {typical}){tag}  {r.parent_asin}")
+        model = getattr(r, "model_verdict", None)
+        note = f" (Claude said {model})" if isinstance(model, str) and model != r.verdict else ""
+        print(f"\n  {r.verdict.upper():9} ${r.price:,.2f} (typical {typical}){tag}{note}  {r.parent_asin}")
         print(f"    {str(r.title)[:90]}")
         print(f"    {r.reason}")
 
