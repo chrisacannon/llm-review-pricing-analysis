@@ -1,0 +1,15 @@
+# Secrets: never commit API keys
+*api-key*
+*api_key*
+*.key
+.env
+.env.*
+
+# Data and the search index are rebuilt by the pipeline; too large and not ours to republish
+data/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
