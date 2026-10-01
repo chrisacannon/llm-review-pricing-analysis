@@ -25,6 +25,9 @@ Workflow (run from the project folder, environment active, API key set):
   3. Rebuild the output and print the summary any time:
        python pipeline\\04_check_prices.py summary
 
+  4. Hand-check the borderline listings it prints; record decisions in price_overrides.csv
+     (parent_asin,verdict,note) and run summary again.
+
 Resumable: products already checked with the current PROMPT_VERSION are skipped. Outputs in data/processed/:
   price_checks.jsonl     raw log, one line per checked product (the source of truth)
   price_checks.parquet   one row per product, latest check wins
@@ -42,6 +45,8 @@ import pandas as pd
 
 DATA = Path("data/processed")
 CHECKS_LOG = DATA / "price_checks.jsonl"
+# Hand-check decisions (parent_asin, verdict, note). Committed: judgment calls, no review data.
+OVERRIDES = Path("price_overrides.csv")
 
 MODEL = "claude-haiku-4-5-20251001"
 PRODUCTS_PER_REQUEST = 10
@@ -53,6 +58,9 @@ PROMPT_VERSION = "v2"
 # Suspect = listed price more than this multiple above (or below) Claude's typical range.
 # Enforced in code: in the v1 pilot Claude flagged prices only ~1.1x its own range.
 SUSPECT_RATIO = 2.0
+# Claude's range estimates vary between runs, so listings this close to the line are
+# listed for a hand-check (the Sony MDR-EX650 flipped between v1 and v2 pilots).
+BORDERLINE = (1.5, 2.5)
 
 # Known problem listings from the project log, always included in the pilot
 PILOT_KNOWN = [
@@ -187,13 +195,23 @@ def build_params(chunk: pd.DataFrame) -> dict:
     }
 
 
+def off_ratio(price: float, low, high) -> float | None:
+    """How far the listed price sits outside Claude's range (1.0 = inside it); None without a range."""
+    if not isinstance(low, (int, float)) or not isinstance(high, (int, float)) or low <= 0 or high < low:
+        return None
+    if price > high:
+        return price / high
+    if price < low:
+        return low / price
+    return 1.0
+
+
 def apply_ratio(price: float, low, high) -> str:
     """The suspect rule, enforced in code rather than left to the prompt."""
-    if not isinstance(low, (int, float)) or not isinstance(high, (int, float)) or low <= 0 or high < low:
+    ratio = off_ratio(price, low, high)
+    if ratio is None:
         return "unsure"
-    if price > high * SUSPECT_RATIO or price < low / SUSPECT_RATIO:
-        return "suspect"
-    return "plausible"
+    return "suspect" if ratio > SUSPECT_RATIO else "plausible"
 
 
 def parse_message(message, chunk: pd.DataFrame) -> list[dict]:
@@ -262,6 +280,17 @@ def finalize(show_ids: set[str] | None = None) -> None:
     products = pd.read_parquet(DATA / "products.parquet", columns=["parent_asin", "title", "price"])
     checks = pd.DataFrame(rows.values())
     checks = checks[checks["parent_asin"].isin(products["parent_asin"])]
+    checks["off_ratio"] = [off_ratio(p, lo, hi) for p, lo, hi
+                           in zip(checks["listed_price"], checks["typical_low"], checks["typical_high"])]
+    checks["override_note"] = None
+    if OVERRIDES.exists():  # hand-check decisions win over Claude and the ratio rule
+        for o in pd.read_csv(OVERRIDES, dtype=str).fillna("").itertuples():
+            hit = checks["parent_asin"] == o.parent_asin
+            if o.verdict in ("plausible", "suspect", "unsure"):
+                checks.loc[hit, "verdict"] = o.verdict
+            checks.loc[hit, "override_note"] = o.note or "hand-checked"
+    # One field for the app and band statistics: suspect listings and non-headphones are left out
+    checks["exclude"] = (checks["verdict"] == "suspect") | ~checks["is_headphone"]
     checks.to_parquet(DATA / "price_checks.parquet", index=False)
 
     df = checks.merge(products, on="parent_asin")
@@ -274,6 +303,18 @@ def finalize(show_ids: set[str] | None = None) -> None:
     if "model_verdict" in df:
         changed = df[df["model_verdict"].notna() & (df["model_verdict"] != df["verdict"])]
         print(f"Verdicts changed by the {SUSPECT_RATIO:g}x rule: {len(changed)}")
+    print(f"Excluded from band statistics: {df['exclude'].sum()} "
+          f"({(df['verdict'] == 'suspect').sum()} suspect, {(~df['is_headphone']).sum()} not headphones)")
+
+    lo, hi = BORDERLINE
+    border = df[df["is_headphone"] & df["off_ratio"].between(lo, hi)]
+    if len(border):
+        print(f"\nBorderline ({lo:g}-{hi:g}x off Claude's range), check by hand:")
+        print(f"  To decide one, add a row to {OVERRIDES} (parent_asin,verdict,note) and run summary.")
+        for r in border.sort_values("off_ratio", ascending=False).itertuples():
+            done = " [hand-checked]" if isinstance(r.override_note, str) else ""
+            print(f"  {r.verdict:9}{done} {r.off_ratio:.2f}x  ${r.price:,.2f} vs ${r.typical_low:,.0f}-{r.typical_high:,.0f}"
+                  f"  {r.parent_asin}  {str(r.title)[:60]}")
 
     flagged = df[(df["verdict"] == "suspect") | ~df["is_headphone"]]
     if show_ids is not None:
