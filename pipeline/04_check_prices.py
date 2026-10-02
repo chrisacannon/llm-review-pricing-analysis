@@ -6,15 +6,18 @@ reseller markups, e.g. a ~$20 Sony earbud listed at $803). For each product Clau
 the title, brand, category, listed price and a few reviews that mention price, and returns:
 
   typical_low/high  Claude's estimate of the normal price range (USD), null if unknown
-  verdict        set in code from the estimate: suspect if the listed price is more than
-                 SUSPECT_RATIO x typical_high or under typical_low / SUSPECT_RATIO;
-                 unsure if there is no estimate; otherwise plausible.
+  verdict        set in code from the estimate when the summary is built: suspect if the listed
+                 price is more than SUSPECT_RATIO x typical_high; unsure if there is no estimate;
+                 otherwise plausible. Only overpricing is flagged: a low listed price is usually a
+                 real sale or clearance price buyers paid, and Claude's low-side estimates for
+                 generic earbuds were guesses from features (full run, 2026-10-01).
                  Claude's own verdict is kept as model_verdict for comparison.
   is_headphone   false for items that aren't headphones or earbuds (cables, terminators, beanies)
   reason         one sentence
 
-Suspect listings are excluded from band statistics and shown in the app as "suspect listings".
-Non-headphones are flagged separately; whether to exclude them is a judgment call for Chris.
+exclude = suspect or not headphones (Chris's call). Excluded products are left out of band
+statistics and shown in the app as "suspect listings". price_overrides.csv can override
+verdict, is_headphone or exclude per product (e.g. multi-packs, whose pack price isn't comparable).
 
 Workflow (run from the project folder, environment active, API key set):
 
@@ -25,8 +28,9 @@ Workflow (run from the project folder, environment active, API key set):
   3. Rebuild the output and print the summary any time:
        python pipeline\\04_check_prices.py summary
 
-  4. Hand-check the borderline listings it prints; record decisions in price_overrides.csv
-     (parent_asin,verdict,note) and run summary again.
+  4. Hand-check the suspects and borderline listings it prints; record decisions in
+     price_overrides.csv and run summary again. Columns: parent_asin, verdict, is_headphone,
+     exclude, note; leave a cell blank to keep the computed value.
 
 Resumable: products already checked with the current PROMPT_VERSION are skipped. Outputs in data/processed/:
   price_checks.jsonl     raw log, one line per checked product (the source of truth)
@@ -197,7 +201,9 @@ def build_params(chunk: pd.DataFrame) -> dict:
 
 def off_ratio(price: float, low, high) -> float | None:
     """How far the listed price sits outside Claude's range (1.0 = inside it); None without a range."""
-    if not isinstance(low, (int, float)) or not isinstance(high, (int, float)) or low <= 0 or high < low:
+    # pd.isna catches the NaN pandas uses for a missing estimate (isinstance alone lets it through)
+    if (not isinstance(low, (int, float)) or not isinstance(high, (int, float))
+            or pd.isna(low) or pd.isna(high) or low <= 0 or high < low):
         return None
     if price > high:
         return price / high
@@ -211,7 +217,7 @@ def apply_ratio(price: float, low, high) -> str:
     ratio = off_ratio(price, low, high)
     if ratio is None:
         return "unsure"
-    return "suspect" if ratio > SUSPECT_RATIO else "plausible"
+    return "suspect" if price > high and ratio > SUSPECT_RATIO else "plausible"
 
 
 def parse_message(message, chunk: pd.DataFrame) -> list[dict]:
@@ -282,15 +288,25 @@ def finalize(show_ids: set[str] | None = None) -> None:
     checks = checks[checks["parent_asin"].isin(products["parent_asin"])]
     checks["off_ratio"] = [off_ratio(p, lo, hi) for p, lo, hi
                            in zip(checks["listed_price"], checks["typical_low"], checks["typical_high"])]
+    # Recomputed here so a change to the rule applies without re-running Claude
+    checks["verdict"] = [apply_ratio(p, lo, hi) for p, lo, hi
+                         in zip(checks["listed_price"], checks["typical_low"], checks["typical_high"])]
+    checks["rule_verdict"] = checks["verdict"]
+    # One field for the app and band statistics: suspect listings and non-headphones are left out
+    checks["exclude"] = (checks["verdict"] == "suspect") | ~checks["is_headphone"]
     checks["override_note"] = None
     if OVERRIDES.exists():  # hand-check decisions win over Claude and the ratio rule
         for o in pd.read_csv(OVERRIDES, dtype=str).fillna("").itertuples():
             hit = checks["parent_asin"] == o.parent_asin
             if o.verdict in ("plausible", "suspect", "unsure"):
                 checks.loc[hit, "verdict"] = o.verdict
+            if o.is_headphone.lower() in ("true", "false"):
+                checks.loc[hit, "is_headphone"] = o.is_headphone.lower() == "true"
+            if o.verdict or o.is_headphone:
+                checks.loc[hit, "exclude"] = (checks.loc[hit, "verdict"] == "suspect") | ~checks.loc[hit, "is_headphone"]
+            if o.exclude.lower() in ("true", "false"):
+                checks.loc[hit, "exclude"] = o.exclude.lower() == "true"
             checks.loc[hit, "override_note"] = o.note or "hand-checked"
-    # One field for the app and band statistics: suspect listings and non-headphones are left out
-    checks["exclude"] = (checks["verdict"] == "suspect") | ~checks["is_headphone"]
     checks.to_parquet(DATA / "price_checks.parquet", index=False)
 
     df = checks.merge(products, on="parent_asin")
@@ -301,22 +317,25 @@ def finalize(show_ids: set[str] | None = None) -> None:
           .reindex([b for b, _, _ in BANDS] + ["All"]).fillna(0).astype(int).to_string())
     print(f"\nNot headphones: {(~df['is_headphone']).sum()}")
     if "model_verdict" in df:
-        changed = df[df["model_verdict"].notna() & (df["model_verdict"] != df["verdict"])]
+        changed = df[df["model_verdict"].notna() & (df["model_verdict"] != df["rule_verdict"])]
         print(f"Verdicts changed by the {SUSPECT_RATIO:g}x rule: {len(changed)}")
-    print(f"Excluded from band statistics: {df['exclude'].sum()} "
-          f"({(df['verdict'] == 'suspect').sum()} suspect, {(~df['is_headphone']).sum()} not headphones)")
+    print(f"Hand-check overrides applied: {df['override_note'].notna().sum()}")
+    ex = df[df["exclude"]]
+    print(f"Excluded from band statistics: {len(ex)} ({(ex['verdict'] == 'suspect').sum()} suspect, "
+          f"{(~ex['is_headphone']).sum()} not headphones, "
+          f"{((ex['verdict'] != 'suspect') & ex['is_headphone']).sum()} other hand-check exclusions)")
 
     lo, hi = BORDERLINE
-    border = df[df["is_headphone"] & df["off_ratio"].between(lo, hi)]
+    border = df[df["is_headphone"] & df["off_ratio"].between(lo, hi) & (df["price"] > df["typical_high"])]
     if len(border):
-        print(f"\nBorderline ({lo:g}-{hi:g}x off Claude's range), check by hand:")
-        print(f"  To decide one, add a row to {OVERRIDES} (parent_asin,verdict,note) and run summary.")
+        print(f"\nBorderline ({lo:g}-{hi:g}x above Claude's range), check by hand:")
+        print(f"  To decide one, add a row to {OVERRIDES} and run summary.")
         for r in border.sort_values("off_ratio", ascending=False).itertuples():
             done = " [hand-checked]" if isinstance(r.override_note, str) else ""
             print(f"  {r.verdict:9}{done} {r.off_ratio:.2f}x  ${r.price:,.2f} vs ${r.typical_low:,.0f}-{r.typical_high:,.0f}"
                   f"  {r.parent_asin}  {str(r.title)[:60]}")
 
-    flagged = df[(df["verdict"] == "suspect") | ~df["is_headphone"]]
+    flagged = df[df["exclude"] | df["override_note"].notna()]
     if show_ids is not None:
         flagged = df[df["parent_asin"].isin(show_ids)]
     pd.set_option("display.width", 200)
@@ -329,6 +348,8 @@ def finalize(show_ids: set[str] | None = None) -> None:
         print(f"\n  {r.verdict.upper():9} ${r.price:,.2f} (typical {typical}){tag}{note}  {r.parent_asin}")
         print(f"    {str(r.title)[:90]}")
         print(f"    {r.reason}")
+        if isinstance(r.override_note, str):
+            print(f"    HAND-CHECK ({'excluded' if r.exclude else 'kept'}): {r.override_note}")
 
 
 # ---------------------------------------------------------------- commands
@@ -388,6 +409,7 @@ def main(argv=None) -> None:
     sub.add_parser("run", help="Check every product not yet checked (standard API)")
     sub.add_parser("summary", help="Rebuild the output and print the summary")
     args = p.parse_args(argv)
+    sys.stdout.reconfigure(errors="replace")  # some titles have characters a redirected Windows console can't encode
     {"pilot": cmd_pilot, "run": cmd_run, "summary": lambda a: finalize()}[args.cmd](args)
 
 
