@@ -9,6 +9,9 @@ Ask one question (from the project folder, environment active, API key set):
 Run the 10-question check and write data/processed/qa_eval.md:
     python qa.py --eval
 
+Cache the app's example answers (re-run after changing EXAMPLES, the prompt or the index):
+    python qa.py --cache-examples
+
 How it works: the question is embedded with the same local model used for the reviews
 (BAAI/bge-small-en-v1.5 via fastembed), the closest reviews are pulled from the Chroma
 store (optionally filtered by price tier, price, value verdict, theme or stars), and
@@ -243,6 +246,38 @@ EVAL_QUESTIONS = [
 ]
 
 
+# The app's example questions. Their answers are generated once (--cache-examples) and served
+# from EXAMPLE_CACHE, so clicking an example is instant, free and doesn't count against a visitor's limit.
+EXAMPLES = [
+    ("What do flagship buyers complain about?", {"bands": ["flagship"]}),
+    ("Why do buyers feel premium headphones are overpriced?", {"bands": ["premium"], "value": ["negative"]}),
+    ("Do budget earbuds hold up over time?", {"bands": ["budget"], "themes": ["build_durability"]}),
+    ("What makes reviewers call a pair of headphones a great deal?", {"value": ["positive"]}),
+]
+EXAMPLE_CACHE = DATA / "example_answers.json"
+
+
+def example_key(question: str, filters: dict) -> str:
+    return json.dumps([question, {k: v for k, v in sorted(filters.items()) if v}])
+
+
+def load_example_cache() -> dict:
+    return json.loads(EXAMPLE_CACHE.read_text(encoding="utf-8")) if EXAMPLE_CACHE.exists() else {}
+
+
+def cache_examples(k: int = 15) -> None:
+    """Answer each example question once and save the results for the app."""
+    cache, total = {}, 0.0
+    for question, filters in EXAMPLES:
+        res = answer(question, k=k, **filters)
+        res["cached_on"] = time.strftime("%Y-%m-%d")
+        cache[example_key(question, filters)] = res
+        total += res["cost"]
+        print(f"  {question}: {len(res['cited'])} cited, {len(res['invalid_citations'])} invalid, ${res['cost']:.3f}")
+    EXAMPLE_CACHE.write_text(json.dumps(cache, indent=1), encoding="utf-8")
+    print(f"\nCached {len(cache)} answers to {EXAMPLE_CACHE} for ${total:.3f}")
+
+
 def show_bands() -> None:
     import pandas as pd
     products = pd.read_parquet(DATA / "products.parquet")
@@ -294,6 +329,8 @@ def main(argv=None) -> None:
     p.add_argument("--band", action="append", choices=list(PRICE_BANDS),
                    help="Price band (repeatable): " + ", ".join(band_label(b) for b in PRICE_BANDS))
     p.add_argument("--bands", action="store_true", help="Show product and review counts per price band")
+    p.add_argument("--cache-examples", action="store_true",
+                   help="Answer the app's example questions once and save them (~$0.08)")
     p.add_argument("--tier", type=int, action="append", help="Price quintile 1-5 (repeatable)")
     p.add_argument("--min-price", type=float)
     p.add_argument("--max-price", type=float)
@@ -309,6 +346,9 @@ def main(argv=None) -> None:
         return
     if a.bands:
         show_bands()
+        return
+    if a.cache_examples:
+        cache_examples(a.k)
         return
     if not a.question:
         p.error("ask a question in quotes, or use --eval")

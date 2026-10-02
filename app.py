@@ -14,6 +14,8 @@ from __future__ import annotations
 import html
 import os
 import re
+import threading
+import time
 
 import altair as alt
 import pandas as pd
@@ -22,6 +24,12 @@ import streamlit as st
 import analytics as an
 
 st.set_page_config(page_title="Headphone Pricing Intelligence", layout="wide")
+
+# Guardrails for the public demo: limits apply to questions on the app's own API key;
+# a visitor's own key has no limit. Example questions are served from a cache and are free.
+SESSION_LIMIT = 5          # per browser session (Chris, 2026-10-02)
+DAILY_LIMIT = 100          # across all visitors, ~$2/day at ~$0.02 an answer; backstop for page reloads
+MAX_QUESTION_CHARS = 500
 
 # ---------------------------------------------------------------- palette
 # Reference palette from the dataviz skill (validated light and dark steps).
@@ -274,17 +282,12 @@ with tab_analytics:
 with tab_qa:
     import qa
 
-    EXAMPLES = [
-        ("What do flagship buyers complain about?", {"bands": ["flagship"]}),
-        ("Why do buyers feel premium headphones are overpriced?", {"bands": ["premium"], "value": ["negative"]}),
-        ("Do budget earbuds hold up over time?", {"bands": ["budget"], "themes": ["build_durability"]}),
-        ("What makes reviewers call a pair of headphones a great deal?", {"value": ["positive"]}),
-    ]
     VALUE_NAMES = {"positive": "Good value", "negative": "Overpriced", "neutral": "Neutral",
                    "not_mentioned": "No price talk"}
     THEME_LIST = sorted(t for t in d["themes"]["theme"].unique() if t != "other")
 
-    def api_key() -> str | None:
+    def app_key() -> str | None:
+        """The app's own key: Streamlit secrets when deployed, the environment locally."""
         try:
             if "ANTHROPIC_API_KEY" in st.secrets:
                 return st.secrets["ANTHROPIC_API_KEY"]
@@ -292,21 +295,46 @@ with tab_qa:
             pass
         return os.environ.get("ANTHROPIC_API_KEY")
 
+    @st.cache_resource
+    def daily_usage() -> dict:
+        """Questions answered on the app's key, shared by every visitor (resets when the app restarts)."""
+        return {"date": None, "count": 0, "lock": threading.Lock()}
+
+    def daily_count() -> int:
+        u = daily_usage()
+        return u["count"] if u["date"] == time.strftime("%Y-%m-%d") else 0
+
+    def record_daily_use() -> None:
+        u = daily_usage()
+        with u["lock"]:
+            today = time.strftime("%Y-%m-%d")
+            if u["date"] != today:
+                u["date"], u["count"] = today, 0
+            u["count"] += 1
+
+    @st.cache_data
+    def example_cache() -> dict:
+        return qa.load_example_cache()
+
     def use_example(question: str, filters: dict) -> None:
         st.session_state["qa_question"] = question
         st.session_state["qa_bands"] = filters.get("bands", [])
         st.session_state["qa_themes"] = filters.get("themes", [])
         st.session_state["qa_value"] = filters.get("value", [])
         st.session_state["qa_stars"] = (1, 5)
+        cached = example_cache().get(qa.example_key(question, filters))
+        if cached:  # instant, free, and doesn't count against the visitor's limit
+            st.session_state.setdefault("qa_history", []).insert(
+                0, {"question": question, "filters": filters, "res": cached, "cached": True})
 
     st.markdown("Ask a question about the reviews. Claude answers from the most relevant reviews only and "
                 "cites each one; click a citation to read the review.")
-    st.caption("Try an example:")
+    st.caption("Try an example (saved answers, free):")
     ex_cols = st.columns(2)
-    for i, (q, f) in enumerate(EXAMPLES):
+    for i, (q, f) in enumerate(qa.EXAMPLES):
         ex_cols[i % 2].button(q, on_click=use_example, args=(q, f), width="stretch", key=f"example_{i}")
 
-    question = st.text_area("Question", key="qa_question", height=80,
+    question = st.text_area("Question", key="qa_question", height=80, max_chars=MAX_QUESTION_CHARS,
                             placeholder="e.g. What do buyers of $100-199 headphones say about battery life?")
     f1, f2, f3, f4 = st.columns(4)
     bands = f1.multiselect("Price band", an.BAND_ORDER, key="qa_bands", format_func=an.band_label)
@@ -315,26 +343,55 @@ with tab_qa:
     value = f3.multiselect("Value verdict", list(VALUE_NAMES), key="qa_value", format_func=VALUE_NAMES.get)
     stars = f4.slider("Stars", 1, 5, (1, 5), key="qa_stars")
 
-    key = api_key()
-    ask = st.button("Ask", type="primary", disabled=not question.strip() or not key)
-    if not key:
-        st.warning("No Claude API key found. Set ANTHROPIC_API_KEY in the environment or in Streamlit secrets.")
+    with st.expander("Use your own Claude API key (no question limit)"):
+        st.text_input("Anthropic API key", type="password", key="visitor_key",
+                      help="Used only for your questions in this browser session. It isn't stored or logged.")
+        st.caption("Get a key at console.anthropic.com. Each answer costs about \\$0.02 on your account.")
+    visitor_key = st.session_state.get("visitor_key", "").strip()
 
-    if ask:
+    used = st.session_state.get("qa_asked", 0)
+    note = None
+    if visitor_key:
+        key, blocked, note = visitor_key, None, "Using your API key."
+    elif not app_key():
+        key, blocked = None, "Questions are unavailable: no API key is configured. Add your own key above."
+    elif used >= SESSION_LIMIT:
+        key, blocked = None, (f"You've used the {SESSION_LIMIT} free questions for this session. "
+                              "Add your own API key above to keep asking.")
+    elif daily_count() >= DAILY_LIMIT:
+        key, blocked = None, ("The demo has reached its daily question limit. Try again tomorrow, "
+                              "or add your own API key above.")
+    else:
+        key, blocked = app_key(), None
+        note = f"{SESSION_LIMIT - used} of {SESSION_LIMIT} free questions left this session."
+
+    ask = st.button("Ask", type="primary", disabled=not question.strip() or not key)
+    if blocked:
+        st.info(blocked)
+    elif note:
+        st.caption(note)
+
+    if ask and key:
         import anthropic
         filters = {"bands": bands or None, "themes": themes or None, "value": value or None,
                    "min_rating": float(stars[0]) if stars != (1, 5) else None,
                    "max_rating": float(stars[1]) if stars != (1, 5) else None}
+        res = None
         with st.spinner("Finding relevant reviews and asking Claude..."):
             try:
-                res = qa.answer(question.strip(), k=15, client=anthropic.Anthropic(api_key=key, max_retries=3),
-                                **filters)
+                res = qa.answer(question.strip()[:MAX_QUESTION_CHARS], k=15,
+                                client=anthropic.Anthropic(api_key=key, max_retries=3), **filters)
+            except anthropic.AuthenticationError:
+                st.error("That API key was rejected. Check it and try again.")
             except anthropic.APIError as e:
                 st.error(f"Claude API error: {e}")
-                res = None
         if res is not None:
+            if not visitor_key:
+                st.session_state["qa_asked"] = used + 1
+                record_daily_use()
             st.session_state.setdefault("qa_history", []).insert(
-                0, {"question": question.strip(), "filters": filters, "res": res})
+                0, {"question": question.strip(), "filters": filters, "res": res, "cached": False})
+            st.rerun()  # refresh the remaining-questions note
 
     def filter_summary(f: dict) -> str:
         parts = []
@@ -398,7 +455,7 @@ with tab_qa:
 
     history = st.session_state.get("qa_history", [])
     if history:
-        total = sum(h["res"]["cost"] for h in history)
+        total = sum(h["res"]["cost"] for h in history if not h.get("cached"))
         st.caption(f"{len(history)} question{'s' if len(history) != 1 else ''} this session · "
                    f"total cost \\${total:.3f}")
     for n, h in enumerate(history):
@@ -408,8 +465,10 @@ with tab_qa:
             st.markdown(f"**{review_md(h['question'])}**")
             st.caption(f"Filters: {filter_summary(h['filters'])}")
             st.markdown(answer_html(res["answer"], by_id, n), unsafe_allow_html=True)
+            cost_txt = (f"saved example answer ({res.get('cached_on', '')}), no cost" if h.get("cached")
+                        else f"cost \\${res['cost']:.3f}")
             st.caption(f"{len(res['reviews'])} reviews retrieved, {len(res['cited'])} cited · "
-                       f"cost \\${res['cost']:.3f} · These are the closest-matching reviews, not a random "
+                       f"{cost_txt} · These are the closest-matching reviews, not a random "
                        f"sample, so counts in the answer aren't frequencies.")
             if res["invalid_citations"]:
                 st.warning("Cited IDs not among the retrieved reviews (ignored): "

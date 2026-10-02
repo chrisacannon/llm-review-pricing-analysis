@@ -13,3 +13,6 @@ __pycache__/
 *.pyc
 .venv/
 venv/
+
+# Streamlit secrets (the app's API key when deployed)
+.streamlit/secrets.toml
