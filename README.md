@@ -82,6 +82,23 @@ python qa.py --eval                    # 10 test questions -> data/processed/qa_
 
 Filters: `--band budget|value|mid|premium|flagship` (under $25, $25-49, $50-99, $100-199, $200+; thresholds in `qa.py`), `--tier 1-5` (equal-count price quintiles), `--min-price`, `--max-price`, `--value positive|negative|neutral|not_mentioned`, `--theme comfort_fit` (repeatable), `--min-rating`, `--max-rating`.
 
+## Phase 4: price check and app
+
+Listed prices are a single snapshot, and some are reseller markups (a ~$20 earbud at $803). Claude Haiku estimates each product's normal price; listings more than twice that, non-headphones and hand-checked cases are excluded from band statistics and shown separately.
+
+```powershell
+python pipeline\04_check_prices.py pilot     # known problem listings + a sample per band
+python pipeline\04_check_prices.py run       # everything else (~$0.40)
+python pipeline\04_check_prices.py summary   # rebuild after editing price_overrides.csv
+```
+
+The Streamlit app's Analytics tab shows the value verdict mix by band (with 95% intervals and sample sizes), what buyers praise and complain about as price rises, products overpriced for their band with their reviews, and the excluded listings.
+
+```powershell
+streamlit run app.py
+python analytics.py                          # the same numbers, printed
+```
+
 ## Limitations
 
 - Price is a single snapshot from when the data was collected; there is no price history.

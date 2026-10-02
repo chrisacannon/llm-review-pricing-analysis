@@ -5,3 +5,4 @@ requests>=2.31
 anthropic>=0.40
 chromadb>=1.0
 fastembed>=0.5
+streamlit>=1.50
