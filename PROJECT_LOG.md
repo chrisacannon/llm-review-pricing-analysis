@@ -2,12 +2,13 @@
 
 What was done, what went wrong, and what changed as a result. Newest entries at the bottom of each phase. Costs are actual Claude API spend.
 
-## Running totals (as of 2026-10-01)
+## Running totals (as of 2026-10-02)
 
 | Item | Value |
 | --- | --- |
-| Products / reviews | 429 headphones / 14,039 reviews (14,030 tagged) |
-| Claude API spend | ~$5.30 (pilot $0.33, prompt re-checks $0.08, batch $3.19, Q&A tests ~$0.18, supplement batch ~$1.50 estimated) |
+| Products / reviews | 429 products / 14,039 reviews (14,030 tagged) |
+| Excluded from band statistics | 39 products (price check + hand-check): 19 suspect listings, 19 not headphones, 1 multi-pack |
+| Claude API spend | ~$5.72 (pilot $0.33, prompt re-checks $0.08, batch $3.19, Q&A tests ~$0.18, supplement batch ~$1.50 estimated, price check $0.42) |
 | Tagging accuracy (hand-check, n=50) | value 96%, themes 86% (prompt v1); v3 fixed the main error patterns |
 
 ## Key decisions
@@ -114,3 +115,33 @@ Tagged 4,517 new reviews in one batch (prompt v3); 9 remain untagged. Index rebu
 | Flagship ($200+) | 88 | 2,993 | 36.1% | 56% / 38% (n=1,077) |
 
 **Emerging headline:** perceived value is flat from budget through mid-range (~72% positive), then drops at $100 and again at $200: flagship buyers who comment on value call it overpriced almost twice as often as budget buyers (38% vs 21%). Not yet adjusted for suspect listings (e.g. Sony MDR-EX155AP at $803, a Brookstone kids' cat-ear headphone at $639.99); the Phase 4 plausibility check comes first.
+
+## Phase 4, step 1: price plausibility check (2026-10-01 to 10-02)
+
+**Why:** listed price is a single snapshot, and reseller markups put products in the wrong band (a ~$20 Sony earbud at $803 counted as flagship). Those products' reviewers paid normal prices, so they diluted the flagship value signal.
+
+**How:** Claude Haiku estimates each product's normal price range from its title, brand and up to 3 price-mentioning reviews, and says whether it's actually headphones (`pipeline/04_check_prices.py`). A rule in code marks a listing **suspect if its price is more than 2× the top of that range**. Suspect listings and non-headphones are excluded from band statistics (`exclude` in `price_checks.parquet`) and shown in the app as suspect listings. Hand-check decisions go in `price_overrides.csv` (committed).
+
+**What changed along the way:**
+
+| Run | Problem | Change |
+| --- | --- | --- |
+| v1 pilot (20 products) | 8/20 suspect; Claude flagged prices only ~1.1× its own range | 2× rule enforced in code, not left to the prompt |
+| v1 pilot | A product was flagged because reviewers called it "overpriced"; removing those would understate the headline metric | v2 prompt: only prices reviewers paid or saw count as evidence, not opinions of worth |
+| v1 pilot | Renewed listing judged against new price; DMX terminator flagged as mispriced because it isn't headphones | v2: judge renewed listings at renewed prices; price and product type judged separately |
+| v2 pilot | Sony MDR-EX650 flipped from 1.8× to 3.1× between runs: Claude's estimates vary | Borderline listings (1.5–2.5×) printed for a hand-check |
+| Full run | 11 of 26 suspects were *too cheap*, mostly generic earbuds priced by guessing from features | Flag overpricing only; a low listed price is usually a real sale price buyers paid |
+
+**Hand-check (Chris):** 10 overrides. Excluded 5 markups between 1.6× and 2× that don't belong in flagship (Bose SoundTrue ×2, Shure E3c, Sony MDR-NC60, Sony XBA-N3). Kept the AKG N400 ($129, near list price). Excluded 2 multi-packs (pack price isn't comparable). Reclassified 2 products as headphones (Sennheiser RS 2000, Chevy Suburban rear-seat headphones).
+
+**Result:** 39 of 429 products excluded: 19 suspect, 19 not headphones, 1 multi-pack. Cost $0.42 (pilots $0.04, full run $0.38).
+
+| Band | Products | Reviews | Overpriced share before → after | n (value verdicts) |
+| --- | --- | --- | --- | --- |
+| Budget | 116 | 3,664 | 20.7% → 21.3% | 1,229 |
+| Value | 81 | 2,734 | 20.0% → 19.8% | 857 |
+| Mid | 61 | 1,925 | 21.8% → 22.6% | 674 |
+| Premium | 61 | 2,091 | 32.1% → 32.3% | 660 |
+| Flagship | 71 | 2,293 | 38.3% → 40.9% | 826 |
+
+**Headline after cleanup:** flagship buyers who comment on value call it overpriced about twice as often as budget-through-mid buyers (41% vs ~21%). Removing the mispriced listings strengthened the flagship signal.

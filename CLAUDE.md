@@ -11,8 +11,9 @@ Data: Amazon Reviews 2023 (McAuley Lab, UCSD), Electronics category, filtered to
 ## Status
 
 - Phase 1 (data), Phase 2 (Claude Haiku tagging, prompt v3), Phase 3 (local embeddings + Chroma + cited Q&A): done.
-- In progress when this file was written: supplemental `--append` pulls to deepen the premium ($100-199) and flagship ($200+) bands, then tagging the new reviews and rebuilding the index. Check `PROJECT_LOG.md` and `python qa.py --bands` for where this landed.
-- Next: **Phase 4, the Streamlit app** (spec below), then Phase 5 (README write-up with findings, GitHub, deploy).
+- Band supplements (deeper mid, premium and flagship): done, tagged and indexed.
+- Phase 4 step 1, price plausibility check: done (39 products excluded; see the log).
+- Next: **Phase 4 step 2, the analytics tab** (spec below), then the Q&A tab, guardrails and deployment; then Phase 5 (README write-up with findings, GitHub, deploy).
 
 ## Environment (Windows, PowerShell)
 
@@ -28,6 +29,8 @@ Data: Amazon Reviews 2023 (McAuley Lab, UCSD), Electronics category, filtered to
 | `pipeline/01_load_data.py` | Stream, filter, sample products by price quintile, reservoir-sample reviews, drop duplicates; `--append` adds products without renumbering |
 | `pipeline/02_tag_reviews.py` | Claude Haiku tags: value sentiment, price mention, up to 5 themes with polarity; pilot / hand-check / batch / retag-check |
 | `pipeline/03_build_index.py` | Local embeddings (BAAI/bge-small-en-v1.5 via fastembed) into Chroma at `data/chroma` with filter metadata |
+| `pipeline/04_check_prices.py` | Claude Haiku price plausibility check: normal price range, is-headphone; suspect rule in code; pilot / run / summary |
+| `price_overrides.csv` | Chris's hand-check decisions on the price check (committed; overrides verdict, is_headphone or exclude) |
 | `pipeline/check_products.py` | Quick look at sampled product titles by tier |
 | `qa.py` | Retrieval, cited answers (Claude Sonnet), price bands, `--bands`, `--eval` |
 | `data/processed/` | parquet outputs, `tags.jsonl` (source of truth for tags), summaries, hand-check CSVs, `qa_eval.md` |
@@ -39,6 +42,7 @@ Data: Amazon Reviews 2023 (McAuley Lab, UCSD), Electronics category, filtered to
 - **Tagging:** `tags.jsonl` is the source of truth. `batch-submit` without `--all` tags only untagged reviews. Use `--all` only after a prompt change, and bump `PROMPT_VERSION`.
 - **Value sentiment** is value for money only, not overall satisfaction. If `mentions_price` is false, value is forced to `not_mentioned` in code. This consistency rule matters: without it the "overpriced" share was overstated (see the log).
 - **Price bands** (in `qa.py` `PRICE_BANDS`): budget <$25, value $25-49, mid $50-99, premium $100-199, flagship $200+. Chris chose to keep these. Quintiles are kept for equal-count statistics.
+- **Band statistics exclude `price_checks.parquet` `exclude == True`** (suspect listings and non-headphones). The suspect rule (>2× above Claude's estimate, overpricing only) lives in code and is recomputed by `summary` without re-running Claude. Hand-check decisions go in `price_overrides.csv`; Chris makes those calls.
 - **Sampling:** premium and flagship were deliberately oversampled by the supplemental pulls. Report statistics **per band**, never pooled across all reviews as if representative.
 - **Q&A answers** must cite review IDs; citations are checked against the retrieved set. Retrieved reviews are the closest matches, not a random sample; answers must not present counts as frequencies.
 - **Costs:** report actual API spend for any step that calls Claude, and add it to the running totals in `PROJECT_LOG.md`. Haiku via Batch API for bulk work; Sonnet for answers.
@@ -46,9 +50,9 @@ Data: Amazon Reviews 2023 (McAuley Lab, UCSD), Electronics category, filtered to
 
 ## Known data issues
 
-- Listed price is a single snapshot and sometimes wrong: third-party reseller markups (a ~$20 Sony MDR-EX155AP listed at $803), and reviewers citing prices far from the listing ("under $100" for a $449.99 listing).
+- Listed price is a single snapshot and sometimes wrong: third-party reseller markups (a ~$20 Sony MDR-EX155AP listed at $803), and reviewers citing prices far from the listing ("under $100" for a $449.99 listing). Handled by the price check: clear markups are excluded; listings below 2× and low listed prices stay in.
 - Reviews comparing several products can be tagged on the other products' verdicts (rare).
-- A few non-headphone items remain (cleaning kit, Bluetooth beanie, car radio), under 2% of products.
+- 19 non-headphone items (stands, cases, cables, beanies, a car radio) are in the sample; the price check flags them and they are excluded from band statistics.
 
 ## Phase 4 spec: Streamlit app
 
