@@ -1,0 +1,11 @@
+parent_asin,verdict,is_headphone,exclude,note
+B06XYTQJTN,,true,,Sennheiser RS 2000 TV listening headphones: these are headphones (Claude misread the category)
+B00GCACVF4,,true,,Chevy Suburban rear-seat wireless headphones: these are headphones
+B08CLZH9MJ,,,true,Multi-pack (24 classroom headphones at $179.99): pack price not comparable to single units
+B08K32B8MX,,,true,Multi-pack (50 earbuds at $25.99): pack price not comparable to single units
+B0BJ1TYBJ2,suspect,,,Bose SoundTrue at $250 vs ~$130-150 (1.67x): reseller markup; does not belong in flagship (Chris)
+B0117RGBRU,suspect,,,Bose SoundTrue Ultra at $244.98 vs ~$130-150 (1.63x): reseller markup; does not belong in flagship (Chris)
+B00WUOMQNI,suspect,,,Shure E3c at $399.99 vs ~$150-250 (1.60x): reseller markup on a discontinued model; does not belong in flagship (Chris)
+B000OQ5OOM,suspect,,,Sony MDR-NC60 at $489.75 vs ~$150-250 (1.96x): reseller markup on a discontinued model; does not belong in flagship (Chris)
+B01LWT2XXX,suspect,,,Sony XBA-N3 Japan import at $561.45 vs ~$200-320 (1.75x): import markup; does not belong in flagship (Chris)
+B088CZR6TY,plausible,,,AKG N400 at $129: close to its list price; Claude's $43-60 range reflected sale prices. Keep (Chris)
