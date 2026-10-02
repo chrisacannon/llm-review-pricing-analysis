@@ -13,7 +13,8 @@ Data: Amazon Reviews 2023 (McAuley Lab, UCSD), Electronics category, filtered to
 - Phase 1 (data), Phase 2 (Claude Haiku tagging, prompt v3), Phase 3 (local embeddings + Chroma + cited Q&A): done.
 - Band supplements (deeper mid, premium and flagship): done, tagged and indexed.
 - Phase 4 step 1, price plausibility check: done (39 products excluded; see the log).
-- Next: **Phase 4 step 2, the analytics tab** (spec below), then the Q&A tab, guardrails and deployment; then Phase 5 (README write-up with findings, GitHub, deploy).
+- Phase 4 steps 2–3, Streamlit app Analytics and Q&A tabs (`streamlit run app.py`): done.
+- Next: **Phase 4 step 4, guardrails for a public demo**, then the deployment decision (spec below); then Phase 5 (README write-up with findings, GitHub, deploy).
 
 ## Environment (Windows, PowerShell)
 
@@ -44,7 +45,7 @@ Data: Amazon Reviews 2023 (McAuley Lab, UCSD), Electronics category, filtered to
 - **Price bands** (in `qa.py` `PRICE_BANDS`): budget <$25, value $25-49, mid $50-99, premium $100-199, flagship $200+. Chris chose to keep these. Quintiles are kept for equal-count statistics.
 - **Band statistics exclude `price_checks.parquet` `exclude == True`** (suspect listings and non-headphones). The suspect rule (>2× above Claude's estimate, overpricing only) lives in code and is recomputed by `summary` without re-running Claude. Hand-check decisions go in `price_overrides.csv`; Chris makes those calls.
 - **Sampling:** premium and flagship were deliberately oversampled by the supplemental pulls. Report statistics **per band**, never pooled across all reviews as if representative.
-- **Q&A answers** must cite review IDs; citations are checked against the retrieved set. Retrieved reviews are the closest matches, not a random sample; answers must not present counts as frequencies.
+- **Q&A answers** must cite review IDs; citations are checked against the retrieved set. Retrieved reviews are the closest matches, not a random sample; answers must not present counts as frequencies. Retrieval leaves out excluded products and takes at most 3 reviews per product.
 - **Costs:** report actual API spend for any step that calls Claude, and add it to the running totals in `PROJECT_LOG.md`. Haiku via Batch API for bulk work; Sonnet for answers.
 - `data/` and any `*api-key*` file are git-ignored. Don't commit data or secrets.
 
