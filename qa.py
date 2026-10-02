@@ -91,12 +91,35 @@ def index_info() -> dict:
     return json.loads(path.read_text()) if path.exists() else {}
 
 
+@lru_cache(maxsize=1)
+def excluded_asins() -> tuple[str, ...]:
+    """Products left out of every statistic by the price check (suspect listings, non-headphones,
+    hand-check exclusions). Q&A leaves them out too, so a $20 earbud listed at $803 isn't
+    quoted as flagship feedback."""
+    path = DATA / "price_checks.parquet"
+    if not path.exists():
+        return ()
+    import pandas as pd
+    checks = pd.read_parquet(path, columns=["parent_asin", "exclude"])
+    return tuple(sorted(checks.loc[checks["exclude"], "parent_asin"]))
+
+
+def band_of(price: float) -> str:
+    for name, (lo, hi) in PRICE_BANDS.items():
+        if price >= lo and (hi is None or price < hi):
+            return name
+    raise ValueError(f"No band for price {price}")
+
+
 def build_where(tiers: list[int] | None = None, bands: list[str] | None = None, min_price: float | None = None,
                 max_price: float | None = None, value: list[str] | None = None,
                 themes: list[str] | None = None, theme_polarity: str | None = None,
-                min_rating: float | None = None, max_rating: float | None = None) -> dict | None:
+                min_rating: float | None = None, max_rating: float | None = None,
+                include_excluded: bool = False) -> dict | None:
     """Translate simple filters into a Chroma `where` clause. Themes are OR-ed."""
     clauses = []
+    if not include_excluded and excluded_asins():
+        clauses.append({"parent_asin": {"$nin": list(excluded_asins())}})
     if bands:
         ors = []
         for b in bands:
@@ -148,7 +171,7 @@ Rules:
 - These reviews are the closest matches retrieved for the question, not a random sample.
   Describe what they say ("several reviewers...", "two reviewers of $15 earbuds...");
   never present counts or percentages as if they describe all reviews.
-- Mention prices and price tiers when they matter to the point.
+- Mention prices and price bands when they matter to the point.
 - Be concise: a one-sentence answer, then 2 to 5 short bullet points."""
 
 
@@ -157,7 +180,7 @@ def _format_reviews(reviews: list[dict]) -> str:
     for r in reviews:
         parts.append(
             f"<review id=\"{r['review_id']}\" product=\"{r['product_title'][:80]}\" "
-            f"price_usd=\"{r['price']:.2f}\" tier=\"{r['tier']} of 5\" stars=\"{r['rating']:.0f}\" "
+            f"price_usd=\"{r['price']:.2f}\" band=\"{band_label(band_of(r['price']))}\" stars=\"{r['rating']:.0f}\" "
             f"value_tag=\"{r['value_sentiment']}\">\n{r['text']}\n</review>"
         )
     return "\n\n".join(parts)

@@ -12,6 +12,7 @@ for the rules behind them (per-band statistics, excluded listings).
 from __future__ import annotations
 
 import html
+import os
 import re
 
 import altair as alt
@@ -271,4 +272,148 @@ with tab_analytics:
                        "Product": st.column_config.TextColumn(width="large")})
 
 with tab_qa:
-    st.info("Coming next: ask questions about the reviews and get answers with clickable citations.")
+    import qa
+
+    EXAMPLES = [
+        ("What do flagship buyers complain about?", {"bands": ["flagship"]}),
+        ("Why do buyers feel premium headphones are overpriced?", {"bands": ["premium"], "value": ["negative"]}),
+        ("Do budget earbuds hold up over time?", {"bands": ["budget"], "themes": ["build_durability"]}),
+        ("What makes reviewers call a pair of headphones a great deal?", {"value": ["positive"]}),
+    ]
+    VALUE_NAMES = {"positive": "Good value", "negative": "Overpriced", "neutral": "Neutral",
+                   "not_mentioned": "No price talk"}
+    THEME_LIST = sorted(t for t in d["themes"]["theme"].unique() if t != "other")
+
+    def api_key() -> str | None:
+        try:
+            if "ANTHROPIC_API_KEY" in st.secrets:
+                return st.secrets["ANTHROPIC_API_KEY"]
+        except Exception:  # no secrets file
+            pass
+        return os.environ.get("ANTHROPIC_API_KEY")
+
+    def use_example(question: str, filters: dict) -> None:
+        st.session_state["qa_question"] = question
+        st.session_state["qa_bands"] = filters.get("bands", [])
+        st.session_state["qa_themes"] = filters.get("themes", [])
+        st.session_state["qa_value"] = filters.get("value", [])
+        st.session_state["qa_stars"] = (1, 5)
+
+    st.markdown("Ask a question about the reviews. Claude answers from the most relevant reviews only and "
+                "cites each one; click a citation to read the review.")
+    st.caption("Try an example:")
+    ex_cols = st.columns(2)
+    for i, (q, f) in enumerate(EXAMPLES):
+        ex_cols[i % 2].button(q, on_click=use_example, args=(q, f), width="stretch", key=f"example_{i}")
+
+    question = st.text_area("Question", key="qa_question", height=80,
+                            placeholder="e.g. What do buyers of $100-199 headphones say about battery life?")
+    f1, f2, f3, f4 = st.columns(4)
+    bands = f1.multiselect("Price band", an.BAND_ORDER, key="qa_bands", format_func=an.band_label)
+    themes = f2.multiselect("Topic", THEME_LIST, key="qa_themes",
+                            format_func=lambda t: t.replace("_", " ").capitalize())
+    value = f3.multiselect("Value verdict", list(VALUE_NAMES), key="qa_value", format_func=VALUE_NAMES.get)
+    stars = f4.slider("Stars", 1, 5, (1, 5), key="qa_stars")
+
+    key = api_key()
+    ask = st.button("Ask", type="primary", disabled=not question.strip() or not key)
+    if not key:
+        st.warning("No Claude API key found. Set ANTHROPIC_API_KEY in the environment or in Streamlit secrets.")
+
+    if ask:
+        import anthropic
+        filters = {"bands": bands or None, "themes": themes or None, "value": value or None,
+                   "min_rating": float(stars[0]) if stars != (1, 5) else None,
+                   "max_rating": float(stars[1]) if stars != (1, 5) else None}
+        with st.spinner("Finding relevant reviews and asking Claude..."):
+            try:
+                res = qa.answer(question.strip(), k=15, client=anthropic.Anthropic(api_key=key, max_retries=3),
+                                **filters)
+            except anthropic.APIError as e:
+                st.error(f"Claude API error: {e}")
+                res = None
+        if res is not None:
+            st.session_state.setdefault("qa_history", []).insert(
+                0, {"question": question.strip(), "filters": filters, "res": res})
+
+    def filter_summary(f: dict) -> str:
+        parts = []
+        if f.get("bands"):
+            parts.append(", ".join(an.band_label(b) for b in f["bands"]))
+        if f.get("themes"):
+            parts.append(", ".join(t.replace("_", " ") for t in f["themes"]))
+        if f.get("value"):
+            parts.append(", ".join(VALUE_NAMES[v] for v in f["value"]))
+        if f.get("min_rating") is not None:
+            parts.append(f"{f['min_rating']:.0f}-{f['max_rating']:.0f} stars")
+        return " · ".join(parts) if parts else "All reviews"
+
+    def answer_html(text: str, by_id: dict, n: int) -> str:
+        """Answer markdown with each citation turned into a link to its review below; hover shows a snippet."""
+        def link(m):
+            rid = m.group(0)
+            r = by_id.get(rid)
+            if r is None:
+                return rid
+            tip = html.escape(f"{r['product_title'][:60]} (${r['price']:.2f}, {r['rating']:.0f} stars): "
+                              f"{str(r['text'])[:160]}...", quote=True)
+            return f'<a href="#cite-{n}-{rid}" title="{tip}">{rid}</a>'
+        text = html.escape(text, quote=False).replace("$", "\\$")
+        return qa.CITE_RE.sub(link, text)
+
+    def esc(s) -> str:
+        """HTML-escape, with $ as an entity so Streamlit doesn't read it as math."""
+        return html.escape(str(s)).replace("$", "&#36;")
+
+    def cited_cards_html(cited: list[str], by_id: dict, n: int) -> str:
+        """One collapsible card per cited review, CSS only: a citation link targets the card (#id),
+        which opens it via :target; clicking the header toggles a hidden checkbox."""
+        verdict_name = {**VALUE_NAMES, "untagged": "Untagged"}
+        css = (f"<style>.cite-toggle{{display:none}}"
+               f".cite-card{{border:1px solid {C['grid']};border-radius:8px;margin:0 0 6px;padding:8px 12px;"
+               f"scroll-margin-top:80px}}"
+               f".cite-head{{cursor:pointer;display:block;font-size:0.9rem}}"
+               f".cite-head .meta{{color:{C['ink2']}}}"
+               f".cite-body{{display:none;margin-top:8px;font-size:0.9rem;line-height:1.5}}"
+               f".cite-body .sub{{color:{C['ink2']};font-size:0.8rem;margin-bottom:6px}}"
+               f".cite-card:target{{border-color:{C['pos']}}}"
+               f".cite-card:target .cite-body,.cite-toggle:checked+.cite-card .cite-body{{display:block}}</style>")
+        cards = []
+        for rid in cited:
+            r = by_id[rid]
+            stars_txt = "★" * int(r["rating"]) + "☆" * (5 - int(r["rating"]))
+            band_name = an.band_label(qa.band_of(r["price"]))
+            body = esc(re.sub(r"<br\s*/?>", "\n", str(r["text"]))).replace("\n", "<br>")
+            sub = (f"{esc(r['product_title'])} · {esc(r['store'])} · value verdict: "
+                   f"{verdict_name.get(r['value_sentiment'], r['value_sentiment'])}"
+                   + (f" · {esc(r['date'])}" if r.get("date") else ""))
+            cards.append(
+                f'<input type="checkbox" class="cite-toggle" id="cb-{n}-{rid}">'
+                f'<div class="cite-card" id="cite-{n}-{rid}">'
+                f'<label class="cite-head" for="cb-{n}-{rid}"><b>{rid}</b> '
+                f'<span class="meta">· {stars_txt} · &#36;{r["price"]:,.2f} · {esc(band_name)} · '
+                f'{esc(r["product_title"][:70])}</span></label>'
+                f'<div class="cite-body"><div class="sub">{sub}</div>{body}</div></div>')
+        return css + "".join(cards)
+
+    history = st.session_state.get("qa_history", [])
+    if history:
+        total = sum(h["res"]["cost"] for h in history)
+        st.caption(f"{len(history)} question{'s' if len(history) != 1 else ''} this session · "
+                   f"total cost \\${total:.3f}")
+    for n, h in enumerate(history):
+        res = h["res"]
+        by_id = {r["review_id"]: r for r in res["reviews"]}
+        with st.container(border=True):
+            st.markdown(f"**{review_md(h['question'])}**")
+            st.caption(f"Filters: {filter_summary(h['filters'])}")
+            st.markdown(answer_html(res["answer"], by_id, n), unsafe_allow_html=True)
+            st.caption(f"{len(res['reviews'])} reviews retrieved, {len(res['cited'])} cited · "
+                       f"cost \\${res['cost']:.3f} · These are the closest-matching reviews, not a random "
+                       f"sample, so counts in the answer aren't frequencies.")
+            if res["invalid_citations"]:
+                st.warning("Cited IDs not among the retrieved reviews (ignored): "
+                           + ", ".join(res["invalid_citations"]))
+            if res["cited"]:
+                st.markdown("**Cited reviews**")
+                st.markdown(cited_cards_html(res["cited"], by_id, n), unsafe_allow_html=True)
