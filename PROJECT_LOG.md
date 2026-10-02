@@ -8,7 +8,7 @@ What was done, what went wrong, and what changed as a result. Newest entries at 
 | --- | --- |
 | Products / reviews | 429 products / 14,039 reviews (14,030 tagged) |
 | Excluded from band statistics | 39 products (price check + hand-check): 19 suspect listings, 19 not headphones, 1 multi-pack |
-| Claude API spend | ~$5.72 (pilot $0.33, prompt re-checks $0.08, batch $3.19, Q&A tests ~$0.18, supplement batch ~$1.50 estimated, price check $0.42) |
+| Claude API spend | ~$5.76 (pilot $0.33, prompt re-checks $0.08, batch $3.19, Q&A tests ~$0.18, supplement batch ~$1.50 estimated, price check $0.42, app Q&A tests $0.04) |
 | Tagging accuracy (hand-check, n=50) | value 96%, themes 86% (prompt v1); v3 fixed the main error patterns |
 
 ## Key decisions
@@ -145,3 +145,17 @@ Tagged 4,517 new reviews in one batch (prompt v3); 9 remain untagged. Index rebu
 | Flagship | 71 | 2,293 | 38.3% → 40.9% | 826 |
 
 **Headline after cleanup:** flagship buyers who comment on value call it overpriced about twice as often as budget-through-mid buyers (41% vs ~21%). Removing the mispriced listings strengthened the flagship signal.
+
+## Phase 4, steps 2–3: Streamlit app (2026-10-02)
+
+**Analytics tab** (`app.py`, numbers in `analytics.py`; no API cost): headline, overpriced share by band with 95% intervals, value verdict mix, a band table with sample sizes, a theme heatmap (net sentiment and prevalence by band), an overpriced-for-band table with a review drill-down, and the excluded listings.
+
+**Overpriced-for-band definition (Chris kept the default):** priced above the band median, at least 8 value verdicts, overpriced share above the band average: 34 products. "Clearly above" (the 95% interval's low end beats the band average): 15. Ranked by that low end.
+
+**What the themes show:** as price rises, sound quality sentiment improves (+0.56 budget → +0.74 flagship) while value-for-money falls (+0.83 → +0.36); connectivity (−0.27) and customer service (−0.64) turn negative at flagship.
+
+**Issue found:** the search index still held reviews of the 39 excluded products; a flagship search for "Sony earbuds with mic" returned 6 of 15 from excluded listings. **Fix:** retrieval leaves excluded products out by default (app and CLI). Claude now sees each review's price band instead of its quintile tier.
+
+**Q&A tab:** example questions, band/topic/value/stars filters, citations that link to and open the cited review (with a hover preview), invalid-citation warnings, and cost per answer. Tested with a stand-in client (it caught a planted fake citation), then live: 2 questions, 29 citations, 0 invalid, $0.036.
+
+**Observed:** retrieval can cluster on one product: 4 of 15 flagship-complaint reviews were the Master & Dynamic MW08 (5 of 15 Master & Dynamic overall). **Fix (Chris approved):** at most 3 reviews per product in each answer (`max_per_product` in `qa.retrieve`, filled from 3× the candidates). On the flagship question this trims the MW08 from 4 to 3; the budget question already had at most 2 per product.

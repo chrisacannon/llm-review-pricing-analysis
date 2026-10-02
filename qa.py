@@ -148,16 +148,25 @@ def build_where(tiers: list[int] | None = None, bands: list[str] | None = None, 
     return clauses[0] if len(clauses) == 1 else {"$and": clauses}
 
 
-def retrieve(question: str, k: int = 15, **filters) -> list[dict]:
+def retrieve(question: str, k: int = 15, max_per_product: int | None = 3, **filters) -> list[dict]:
+    """The k closest reviews, at most max_per_product from any one product (None = no cap).
+    Guards against one product dominating an answer (Phase 3: Bang & Olufsen; Phase 4: 4 of 15
+    flagship-complaint reviews were the Master & Dynamic MW08)."""
     res = collection().query(
         query_embeddings=[embed_query(question).tolist()],
-        n_results=k,
+        n_results=k * 3 if max_per_product else k,  # extra candidates to fill the cap from
         where=build_where(**filters),
         include=["documents", "metadatas", "distances"],
     )
-    out = []
+    out, per_product = [], {}
     for doc, meta, dist in zip(res["documents"][0], res["metadatas"][0], res["distances"][0]):
+        asin = meta.get("parent_asin")
+        if max_per_product and per_product.get(asin, 0) >= max_per_product:
+            continue
+        per_product[asin] = per_product.get(asin, 0) + 1
         out.append({**meta, "text": doc, "distance": round(float(dist), 4)})
+        if len(out) == k:
+            break
     return out
 
 
