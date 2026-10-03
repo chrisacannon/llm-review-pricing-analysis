@@ -13,8 +13,9 @@ Cache the app's example answers (re-run after changing EXAMPLES, the prompt or t
     python qa.py --cache-examples
 
 How it works: the question is embedded with the same local model used for the reviews
-(BAAI/bge-small-en-v1.5 via fastembed), the closest reviews are pulled from the Chroma
-store (optionally filtered by price tier, price, value verdict, theme or stars), and
+(BAAI/bge-small-en-v1.5 via fastembed), the closest reviews are found in the saved review
+embeddings (optionally filtered by price band, price, value verdict, theme or stars; excluded
+listings left out; at most 3 reviews per product), and
 Claude answers from those reviews only, citing review IDs like [r001234]. Citations are
 then checked against the reviews actually retrieved.
 """
@@ -33,8 +34,8 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parent
 DATA = ROOT / "data" / "processed"
-CHROMA_DIR = ROOT / "data" / "chroma"
-COLLECTION = "reviews"
+EMBEDDINGS = DATA / "review_embeddings.npz"  # review ids + unit-length vectors, from 03_build_index.py
+MAX_DOC_CHARS = 2000
 EMBED_MODEL = "BAAI/bge-small-en-v1.5"
 EMBED_CACHE = Path.home() / ".cache" / "fastembed"  # outside OneDrive; ~130 MB, downloaded once
 ANSWER_MODEL = "claude-sonnet-5-5"
@@ -79,18 +80,52 @@ def embed_query(text: str) -> np.ndarray:
     return _normalize(np.array(list(_embedder().query_embed(text)), dtype=np.float32))[0]
 
 
-# ---------------------------------------------------------------- store
+# ---------------------------------------------------------------- index
+# One unit-length vector per review in a single .npz file (~22 MB). Search is a matrix product,
+# and filters run on a table built from the parquet files, so they always match the latest tags.
+
+def review_doc(title, text) -> str:
+    """The text that is embedded and shown to Claude: review title, then body."""
+    title = str(title or "").strip()
+    return (f"{title}. " if title else "") + str(text)[:MAX_DOC_CHARS]
+
 
 @lru_cache(maxsize=1)
-def collection():
-    import chromadb
-    if not CHROMA_DIR.exists():
+def _index() -> tuple[np.ndarray, "pd.DataFrame"]:
+    """(vectors, table): row i of the table describes vector i."""
+    import pandas as pd
+    if not EMBEDDINGS.exists():
         sys.exit("No review index yet. Run:  python pipeline\\03_build_index.py")
-    return chromadb.PersistentClient(path=str(CHROMA_DIR)).get_collection(COLLECTION)
+    with np.load(EMBEDDINGS) as z:
+        ids, vectors = z["ids"], z["vectors"]
+    reviews = pd.read_parquet(DATA / "reviews.parquet",
+                              columns=["review_id", "parent_asin", "rating", "helpful_vote", "date", "title", "text"])
+    products = pd.read_parquet(DATA / "products.parquet",
+                               columns=["parent_asin", "title", "store", "price", "price_quintile"])
+    tags = pd.read_parquet(DATA / "review_tags.parquet", columns=["review_id", "value_sentiment", "mentions_price"])
+    t = (pd.DataFrame({"review_id": ids})
+         .merge(reviews, on="review_id", how="left")
+         .merge(products.rename(columns={"title": "product_title"}), on="parent_asin", how="left")
+         .merge(tags, on="review_id", how="left"))
+    t["text"] = [review_doc(a, b) for a, b in zip(t["title"], t["text"])]
+    t["product_title"] = t["product_title"].fillna("").str.slice(0, 150)
+    t["store"] = t["store"].fillna("")
+    t["tier"] = t["price_quintile"].str.slice(1, 2).astype(int)  # "Q1 lowest" -> 1
+    t["rating"] = t["rating"].fillna(0).astype(float)
+    t["helpful_vote"] = t["helpful_vote"].fillna(0).astype(int)
+    t["date"] = t["date"].astype(str).replace({"None": "", "NaT": ""})
+    t["value_sentiment"] = t["value_sentiment"].fillna("untagged")
+    t["mentions_price"] = t["mentions_price"].astype("boolean").fillna(False).astype(bool)
+    themes = pd.read_parquet(DATA / "review_themes.parquet", columns=["review_id", "theme", "polarity"])
+    pol = themes.pivot_table(index="review_id", columns="theme", values="polarity", aggfunc="first")
+    for theme in pol.columns:
+        t[f"theme_{theme}"] = t["review_id"].map(pol[theme]).fillna("none")
+    t = t.drop(columns=["title", "price_quintile"]).reset_index(drop=True)
+    return vectors, t
 
 
 def index_info() -> dict:
-    path = CHROMA_DIR / "index_info.json"
+    path = EMBEDDINGS.with_suffix(".json")
     return json.loads(path.read_text()) if path.exists() else {}
 
 
@@ -114,60 +149,65 @@ def band_of(price: float) -> str:
     raise ValueError(f"No band for price {price}")
 
 
-def build_where(tiers: list[int] | None = None, bands: list[str] | None = None, min_price: float | None = None,
-                max_price: float | None = None, value: list[str] | None = None,
+def filter_mask(t, tiers: list[int] | None = None, bands: list[str] | None = None,
+                min_price: float | None = None, max_price: float | None = None, value: list[str] | None = None,
                 themes: list[str] | None = None, theme_polarity: str | None = None,
                 min_rating: float | None = None, max_rating: float | None = None,
-                include_excluded: bool = False) -> dict | None:
-    """Translate simple filters into a Chroma `where` clause. Themes are OR-ed."""
-    clauses = []
+                include_excluded: bool = False) -> np.ndarray:
+    """Rows of the index table that pass the filters. Bands are OR-ed, themes are OR-ed,
+    everything else is AND-ed."""
+    m = np.ones(len(t), dtype=bool)
     if not include_excluded and excluded_asins():
-        clauses.append({"parent_asin": {"$nin": list(excluded_asins())}})
+        m &= ~t["parent_asin"].isin(excluded_asins()).to_numpy()
     if bands:
-        ors = []
+        in_band = np.zeros(len(t), dtype=bool)
         for b in bands:
             lo, hi = PRICE_BANDS[b]
-            rng = [{"price": {"$gte": float(lo)}}] + ([{"price": {"$lt": float(hi)}}] if hi else [])
-            ors.append(rng[0] if len(rng) == 1 else {"$and": rng})
-        clauses.append(ors[0] if len(ors) == 1 else {"$or": ors})
+            in_band |= ((t["price"] >= lo) & ((t["price"] < hi) if hi else True)).to_numpy()
+        m &= in_band
     if tiers:
-        clauses.append({"tier": {"$in": [int(t) for t in tiers]}})
+        m &= t["tier"].isin([int(x) for x in tiers]).to_numpy()
     if min_price is not None:
-        clauses.append({"price": {"$gte": float(min_price)}})
+        m &= (t["price"] >= float(min_price)).to_numpy()
     if max_price is not None:
-        clauses.append({"price": {"$lte": float(max_price)}})
+        m &= (t["price"] <= float(max_price)).to_numpy()
     if value:
-        clauses.append({"value_sentiment": {"$in": list(value)}})
+        m &= t["value_sentiment"].isin(list(value)).to_numpy()
     if min_rating is not None:
-        clauses.append({"rating": {"$gte": float(min_rating)}})
+        m &= (t["rating"] >= float(min_rating)).to_numpy()
     if max_rating is not None:
-        clauses.append({"rating": {"$lte": float(max_rating)}})
+        m &= (t["rating"] <= float(max_rating)).to_numpy()
     if themes:
         allowed = [theme_polarity] if theme_polarity else ["positive", "negative", "mixed"]
-        ors = [{f"theme_{t}": {"$in": allowed}} for t in themes]
-        clauses.append(ors[0] if len(ors) == 1 else {"$or": ors})
-    if not clauses:
-        return None
-    return clauses[0] if len(clauses) == 1 else {"$and": clauses}
+        has = np.zeros(len(t), dtype=bool)
+        for theme in themes:
+            col = f"theme_{theme}"
+            if col in t:
+                has |= t[col].isin(allowed).to_numpy()
+        m &= has
+    return m
 
 
 def retrieve(question: str, k: int = 15, max_per_product: int | None = 3, **filters) -> list[dict]:
     """The k closest reviews, at most max_per_product from any one product (None = no cap).
     Guards against one product dominating an answer (Phase 3: Bang & Olufsen; Phase 4: 4 of 15
     flagship-complaint reviews were the Master & Dynamic MW08)."""
-    res = collection().query(
-        query_embeddings=[embed_query(question).tolist()],
-        n_results=k * 3 if max_per_product else k,  # extra candidates to fill the cap from
-        where=build_where(**filters),
-        include=["documents", "metadatas", "distances"],
-    )
+    vectors, t = _index()
+    rows = np.flatnonzero(filter_mask(t, **filters))
+    if len(rows) == 0:
+        return []
+    scores = vectors[rows] @ embed_query(question)  # cosine similarity: all vectors are unit length
+    order = rows[np.argsort(-scores, kind="stable")]
+    sims = dict(zip(rows, scores))
     out, per_product = [], {}
-    for doc, meta, dist in zip(res["documents"][0], res["metadatas"][0], res["distances"][0]):
-        asin = meta.get("parent_asin")
+    for i in order:
+        r = t.iloc[i]
+        asin = r["parent_asin"]
         if max_per_product and per_product.get(asin, 0) >= max_per_product:
             continue
         per_product[asin] = per_product.get(asin, 0) + 1
-        out.append({**meta, "text": doc, "distance": round(float(dist), 4)})
+        # distance as Chroma reported it (squared L2 between unit vectors), kept for continuity
+        out.append({**r.to_dict(), "distance": round(float(2 - 2 * sims[i]), 4)})
         if len(out) == k:
             break
     return out

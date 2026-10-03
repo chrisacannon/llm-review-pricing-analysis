@@ -16,3 +16,6 @@ venv/
 
 # Streamlit secrets (the app's API key when deployed)
 .streamlit/secrets.toml
+
+# App data for deployment: built by pipeline/05_app_data.py, uploaded to a private HF repo, never committed
+app_data/

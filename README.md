@@ -71,7 +71,7 @@ Resumable: already-tagged reviews are skipped, and missed ones can be resubmitte
 
 ## Phase 3: search index and Q&A
 
-Reviews are embedded locally with `BAAI/bge-small-en-v1.5` (via fastembed, no API cost) and stored in a Chroma database with price, tier, stars, value verdict and theme metadata for filtering. Claude Sonnet answers questions from the retrieved reviews only, citing review IDs, and every citation is checked against what was actually retrieved.
+Reviews are embedded locally with `BAAI/bge-small-en-v1.5` (via fastembed, no API cost) and saved as one vector per review (`review_embeddings.npz`, ~22 MB); search is a matrix product, with filters for price band, stars, value verdict and theme. Claude Sonnet answers questions from the retrieved reviews only, citing review IDs, and every citation is checked against what was actually retrieved.
 
 ```powershell
 python pipeline\03_build_index.py     # a few minutes; first run downloads the model (~130 MB)

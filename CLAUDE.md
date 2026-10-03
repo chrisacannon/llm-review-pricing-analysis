@@ -10,7 +10,7 @@ Data: Amazon Reviews 2023 (McAuley Lab, UCSD), Electronics category, filtered to
 
 ## Status
 
-- Phase 1 (data), Phase 2 (Claude Haiku tagging, prompt v3), Phase 3 (local embeddings + Chroma + cited Q&A): done.
+- Phase 1 (data), Phase 2 (Claude Haiku tagging, prompt v3), Phase 3 (local embeddings + cited Q&A): done.
 - Band supplements (deeper mid, premium and flagship): done, tagged and indexed.
 - Phase 4 step 1, price plausibility check: done (39 products excluded; see the log).
 - Phase 4 steps 2–3, Streamlit app Analytics and Q&A tabs (`streamlit run app.py`): done.
@@ -29,7 +29,7 @@ Data: Amazon Reviews 2023 (McAuley Lab, UCSD), Electronics category, filtered to
 | --- | --- |
 | `pipeline/01_load_data.py` | Stream, filter, sample products by price quintile, reservoir-sample reviews, drop duplicates; `--append` adds products without renumbering |
 | `pipeline/02_tag_reviews.py` | Claude Haiku tags: value sentiment, price mention, up to 5 themes with polarity; pilot / hand-check / batch / retag-check |
-| `pipeline/03_build_index.py` | Local embeddings (BAAI/bge-small-en-v1.5 via fastembed) into Chroma at `data/chroma` with filter metadata |
+| `pipeline/03_build_index.py` | Local embeddings (BAAI/bge-small-en-v1.5 via fastembed) to `data/processed/review_embeddings.npz`; `qa.py` searches it with numpy (replaced Chroma 2026-10-02) |
 | `pipeline/04_check_prices.py` | Claude Haiku price plausibility check: normal price range, is-headphone; suspect rule in code; pilot / run / summary |
 | `price_overrides.csv` | Chris's hand-check decisions on the price check (committed; overrides verdict, is_headphone or exclude) |
 | `pipeline/check_products.py` | Quick look at sampled product titles by tier |
@@ -67,7 +67,7 @@ Goal from the plan: a deployed Streamlit app with a price-band vs value-sentimen
    - Show sample sizes (products, reviews) beside every band statistic.
 3. **Q&A tab:** question box, band / theme / value / stars filters, the answer with clickable citations that expand to the review text, price and stars. Show cost per answer.
 4. **Guardrails for a public demo:** per-session question cap; a few canned example questions with cached answers; optional field for the visitor's own API key; the app's key from Streamlit secrets, never committed.
-5. **Deployment open question:** `data/` is git-ignored, but Streamlit Community Cloud needs the processed parquet files and the Chroma index (~55 MB+). Decide with Chris: commit a slim `app_data/` (parquet + index) built by a script, or build the index at app startup from committed parquet files. Check the dataset's terms before publishing review text.
+5. **Deployment (decided 2026-10-02, option C):** public code repo; the app's data (~27 MB: parquet files + review embeddings + example answers) in a **private** Hugging Face dataset repo, downloaded at startup with a token from Streamlit secrets. Review text is never committed to GitHub. Why: the dataset states no license for the review text (code repo is MIT; the lab asks for a citation), and a public commit is hard to undo. Chris chose not to email the lab.
 
 ## Working style
 

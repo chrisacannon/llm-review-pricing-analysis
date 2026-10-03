@@ -1,14 +1,20 @@
 """
 Phase 3: build the searchable review index.
 
-Embeds every review locally (no API cost) with BAAI/bge-small-en-v1.5 and stores it in a
-Chroma database at data/chroma, along with metadata for filtering: price, price tier,
-stars, value verdict and one field per theme. Re-running rebuilds the index from scratch.
+Embeds every review locally (no API cost) with BAAI/bge-small-en-v1.5 and saves the
+unit-length vectors with their review IDs to data/processed/review_embeddings.npz (~22 MB),
+plus review_embeddings.json with build details. qa.py searches it with a matrix product and
+filters on the parquet files, so re-tagging reviews doesn't need a rebuild; adding or
+removing reviews does. Re-running rebuilds from scratch.
 
     python pipeline\\03_build_index.py
 
 The first run downloads the embedding model (~130 MB, cached in your user folder).
-Embedding ~9,600 reviews takes a few minutes on a laptop CPU.
+Embedding ~14,000 reviews takes about an hour on a laptop CPU (~53 min measured 2026-10-02);
+only needed when reviews are added or removed.
+
+(Until 2026-10-02 the index was a Chroma database at data/chroma. Replaced to make the
+deployed app lighter; search results were checked to be identical on 18 test queries.)
 """
 
 from __future__ import annotations
@@ -18,84 +24,38 @@ import sys
 import time
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import qa  # noqa: E402
 
-MAX_DOC_CHARS = 2000
 EMBED_BATCH = 256
-ADD_BATCH = 1000
-
-
-def load() -> tuple[pd.DataFrame, list[str]]:
-    reviews = pd.read_parquet(qa.DATA / "reviews.parquet")
-    products = pd.read_parquet(qa.DATA / "products.parquet")[
-        ["parent_asin", "title", "store", "price", "price_quintile"]].rename(columns={"title": "product_title"})
-    tags = pd.read_parquet(qa.DATA / "review_tags.parquet")[
-        ["review_id", "value_sentiment", "mentions_price", "themes_json"]]
-    df = reviews.merge(products, on="parent_asin", how="left").merge(tags, on="review_id", how="left")
-    themes = sorted(pd.read_parquet(qa.DATA / "review_themes.parquet")["theme"].unique())
-    return df, themes
-
-
-def metadata(r, themes: list[str]) -> dict:
-    tagged = isinstance(r.themes_json, str)
-    polarity = {t["theme"]: t["polarity"] for t in json.loads(r.themes_json)} if tagged else {}
-    meta = {
-        "review_id": r.review_id,
-        "parent_asin": r.parent_asin,
-        "product_title": str(r.product_title or "")[:150],
-        "store": str(r.store or ""),
-        "price": float(r.price),
-        "tier": int(str(r.price_quintile)[1]),  # "Q1 lowest" -> 1
-        "rating": float(r.rating or 0),
-        "helpful_vote": int(r.helpful_vote or 0),
-        "date": str(r.date or ""),
-        "value_sentiment": r.value_sentiment if tagged else "untagged",
-        "mentions_price": bool(r.mentions_price) if tagged else False,
-    }
-    for t in themes:
-        meta[f"theme_{t}"] = polarity.get(t, "none")
-    return meta
 
 
 def main() -> None:
-    import chromadb
-
     start = time.time()
-    df, themes = load()
-    docs = [(f"{t}. " if t else "") + str(x)[:MAX_DOC_CHARS]
-            for t, x in zip(df["title"].fillna("").str.strip(), df["text"])]
-    print(f"Embedding {len(docs):,} reviews with {qa.EMBED_MODEL} "
-          f"(first run downloads the model)")
+    reviews = pd.read_parquet(qa.DATA / "reviews.parquet", columns=["review_id", "title", "text"])
+    reviews = reviews.sort_values("review_id").reset_index(drop=True)
+    docs = [qa.review_doc(t, x) for t, x in zip(reviews["title"], reviews["text"])]
+    print(f"Embedding {len(docs):,} reviews with {qa.EMBED_MODEL} (first run downloads the model)")
 
     vectors = []
     for i in range(0, len(docs), EMBED_BATCH):
         vectors.append(qa.embed_documents(docs[i:i + EMBED_BATCH]))
         done = min(i + EMBED_BATCH, len(docs))
         print(f"  {done:,}/{len(docs):,} embedded ({time.time() - start:,.0f}s)")
-    vectors = __import__("numpy").vstack(vectors)
+    vectors = np.vstack(vectors).astype(np.float32)
 
-    qa.CHROMA_DIR.mkdir(parents=True, exist_ok=True)
-    client = chromadb.PersistentClient(path=str(qa.CHROMA_DIR))
-    if qa.COLLECTION in [c if isinstance(c, str) else c.name for c in client.list_collections()]:
-        client.delete_collection(qa.COLLECTION)  # rebuild from scratch
-    col = client.create_collection(qa.COLLECTION)  # vectors are unit length, so L2 ranks like cosine
-    metas = [metadata(r, themes) for r in df.itertuples()]
-    ids = df["review_id"].tolist()
-    for i in range(0, len(ids), ADD_BATCH):
-        col.add(ids=ids[i:i + ADD_BATCH], embeddings=vectors[i:i + ADD_BATCH].tolist(),
-                documents=docs[i:i + ADD_BATCH], metadatas=metas[i:i + ADD_BATCH])
-
-    info = {"reviews": col.count(), "embed_model": qa.EMBED_MODEL, "dims": int(vectors.shape[1]),
-            "themes": themes, "untagged": int((df["value_sentiment"].isna()).sum()),
+    np.savez(qa.EMBEDDINGS, ids=reviews["review_id"].to_numpy(dtype=str), vectors=vectors)
+    tags = pd.read_parquet(qa.DATA / "review_tags.parquet", columns=["review_id"])
+    info = {"reviews": len(reviews), "embed_model": qa.EMBED_MODEL, "dims": int(vectors.shape[1]),
+            "untagged": int((~reviews["review_id"].isin(tags["review_id"])).sum()),
             "built": time.strftime("%Y-%m-%d %H:%M")}
-    (qa.CHROMA_DIR / "index_info.json").write_text(json.dumps(info, indent=2))
-    size_mb = sum(f.stat().st_size for f in qa.CHROMA_DIR.rglob("*") if f.is_file()) / 1e6
-    print(f"\nIndexed {info['reviews']:,} reviews ({info['dims']} dims) in "
-          f"{time.time() - start:,.0f}s; index is {size_mb:,.0f} MB at {qa.CHROMA_DIR}")
+    qa.EMBEDDINGS.with_suffix(".json").write_text(json.dumps(info, indent=2))
+    print(f"\nIndexed {info['reviews']:,} reviews ({info['dims']} dims) in {time.time() - start:,.0f}s; "
+          f"{qa.EMBEDDINGS.stat().st_size / 1e6:,.0f} MB at {qa.EMBEDDINGS}")
     print('Try it:  python qa.py "What do buyers of flagship headphones complain about?" --band flagship')
 
 
