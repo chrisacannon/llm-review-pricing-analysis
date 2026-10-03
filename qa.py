@@ -32,8 +32,10 @@ from pathlib import Path
 
 import numpy as np
 
+import datasource
+
 ROOT = Path(__file__).resolve().parent
-DATA = ROOT / "data" / "processed"
+DATA = datasource.data_dir()  # data/processed locally; app_data/ when deployed
 EMBEDDINGS = DATA / "review_embeddings.npz"  # review ids + unit-length vectors, from 03_build_index.py
 MAX_DOC_CHARS = 2000
 EMBED_MODEL = "BAAI/bge-small-en-v1.5"

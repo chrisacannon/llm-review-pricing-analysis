@@ -21,9 +21,10 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+import datasource
 from qa import PRICE_BANDS, band_label
 
-DATA = Path(__file__).resolve().parent / "data" / "processed"
+DATA = datasource.data_dir()  # data/processed locally; app_data/ when deployed
 BAND_ORDER = list(PRICE_BANDS)
 VERDICTS = ["negative", "neutral", "positive"]  # reviews that give a value verdict
 Z95 = 1.96

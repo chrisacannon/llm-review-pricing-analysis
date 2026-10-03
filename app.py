@@ -21,9 +21,36 @@ import altair as alt
 import pandas as pd
 import streamlit as st
 
-import analytics as an
+import datasource
 
 st.set_page_config(page_title="Headphone Pricing Intelligence", layout="wide")
+
+
+def secret(name: str) -> str | None:
+    """Streamlit secrets when deployed, the environment locally."""
+    try:
+        if name in st.secrets:
+            return st.secrets[name]
+    except Exception:  # no secrets file
+        pass
+    return os.environ.get(name)
+
+
+@st.cache_resource(show_spinner=False)
+def fetch_data(repo: str):
+    """Once per server: download the private data repo (see datasource.py)."""
+    return datasource.download(repo, secret("HF_TOKEN"))
+
+
+if not datasource.has_data():
+    if not secret("HF_DATA_REPO"):
+        st.error("No review data found. Run the pipeline locally, or set HF_DATA_REPO and HF_TOKEN "
+                 "in Streamlit secrets to download it.")
+        st.stop()
+    with st.spinner("Downloading the review data (first start only)..."):
+        fetch_data(secret("HF_DATA_REPO"))
+
+import analytics as an  # noqa: E402  (after the data is in place: it reads from datasource.data_dir())
 
 # Guardrails for the public demo: limits apply to questions on the app's own API key;
 # a visitor's own key has no limit. Example questions are served from a cache and are free.
@@ -287,13 +314,7 @@ with tab_qa:
     THEME_LIST = sorted(t for t in d["themes"]["theme"].unique() if t != "other")
 
     def app_key() -> str | None:
-        """The app's own key: Streamlit secrets when deployed, the environment locally."""
-        try:
-            if "ANTHROPIC_API_KEY" in st.secrets:
-                return st.secrets["ANTHROPIC_API_KEY"]
-        except Exception:  # no secrets file
-            pass
-        return os.environ.get("ANTHROPIC_API_KEY")
+        return secret("ANTHROPIC_API_KEY")
 
     @st.cache_resource
     def daily_usage() -> dict:
