@@ -67,7 +67,7 @@ Goal from the plan: a deployed Streamlit app with a price-band vs value-sentimen
    - Show sample sizes (products, reviews) beside every band statistic.
 3. **Q&A tab:** question box, band / theme / value / stars filters, the answer with clickable citations that expand to the review text, price and stars. Show cost per answer.
 4. **Guardrails for a public demo:** per-session question cap; a few canned example questions with cached answers; optional field for the visitor's own API key; the app's key from Streamlit secrets, never committed.
-5. **Deployment (decided 2026-10-02, option C):** public code repo; the app's data (~27 MB: parquet files + review embeddings + example answers) in a **private** Hugging Face dataset repo, downloaded at startup with a token from Streamlit secrets. Review text is never committed to GitHub. Why: the dataset states no license for the review text (code repo is MIT; the lab asks for a citation), and a public commit is hard to undo. Chris chose not to email the lab.
+5. **Deployment (decided 2026-10-02, option C):** public code repo; the app's data (~27 MB: parquet files + review embeddings + example answers) in a **private** Hugging Face dataset repo, downloaded at startup with a token from Streamlit secrets. Review text is never committed to GitHub. Why: the dataset states no license for the review text (code repo is MIT; the lab asks for a citation), and a public commit is hard to undo.
 
 ## Working style
 

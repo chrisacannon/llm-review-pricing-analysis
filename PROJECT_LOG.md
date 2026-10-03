@@ -8,7 +8,7 @@ What was done, what went wrong, and what changed as a result. Newest entries at 
 | --- | --- |
 | Products / reviews | 429 products / 14,039 reviews (14,030 tagged) |
 | Excluded from band statistics | 39 products (price check + hand-check): 19 suspect listings, 19 not headphones, 1 multi-pack |
-| Claude API spend | ~$5.76 (pilot $0.33, prompt re-checks $0.08, batch $3.19, Q&A tests ~$0.18, supplement batch ~$1.50 estimated, price check $0.42, app Q&A tests $0.04) |
+| Claude API spend | ~$5.85 (pilot $0.33, prompt re-checks $0.08, batch $3.19, Q&A tests ~$0.18, supplement batch ~$1.50 estimated, price check $0.42, app Q&A tests $0.04, cached example answers $0.085) |
 | Tagging accuracy (hand-check, n=50) | value 96%, themes 86% (prompt v1); v3 fixed the main error patterns |
 
 ## Key decisions
@@ -159,3 +159,13 @@ Tagged 4,517 new reviews in one batch (prompt v3); 9 remain untagged. Index rebu
 **Q&A tab:** example questions, band/topic/value/stars filters, citations that link to and open the cited review (with a hover preview), invalid-citation warnings, and cost per answer. Tested with a stand-in client (it caught a planted fake citation), then live: 2 questions, 29 citations, 0 invalid, $0.036.
 
 **Observed:** retrieval can cluster on one product: 4 of 15 flagship-complaint reviews were the Master & Dynamic MW08 (5 of 15 Master & Dynamic overall). **Fix (Chris approved):** at most 3 reviews per product in each answer (`max_per_product` in `qa.retrieve`, filled from 3× the candidates). On the flagship question this trims the MW08 from 4 to 3; the budget question already had at most 2 per product.
+
+## Phase 4, step 4 and deployment prep (2026-10-02)
+
+**Guardrails:** 5 questions per session on the app's key (Chris); a shared 100/day backstop, because a page reload resets the session count; example answers cached and free (`qa.py --cache-examples`: 4 answers, 56 citations, 0 invalid, $0.085); an optional visitor key with no limit; the app key from Streamlit secrets; a 500-character question limit.
+
+**Deployment decision (Chris): option C, public code and private data.** The dataset states no license for the review text (the code repo is MIT; the lab asks for a citation). A public commit is hard to undo and risks a takedown, so the review text never goes to GitHub. The app's data (26 MB: only the columns it reads, no reviewer IDs) sits in a private Hugging Face dataset repo, and the app downloads it on first start with checksum verification. The README and app credit the source and explain how the text is handled.
+
+**Chroma replaced with numpy search:** vectors were exported from Chroma, and search is now a matrix product with pandas filters. Results were identical on 18 test queries (IDs, order, distances, text); a search takes ~15 ms. The deploy shrinks from ~125 MB to 26 MB and drops a dependency. A full re-embed takes ~53 min on this laptop; the new build script reproduced the stored vectors exactly on a 512-review sample.
+
+**Issues:** the app-data build failed on OneDrive's folder lock, so it now empties the folder instead of deleting it. A real download from the private repo was tested locally by Chris.
