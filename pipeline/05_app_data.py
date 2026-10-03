@@ -53,9 +53,11 @@ def sha256(path: Path) -> str:
 
 
 def cmd_build(args) -> None:
-    if OUT.exists():
-        shutil.rmtree(OUT)
-    OUT.mkdir()
+    # Empty the folder rather than deleting it: on Windows, OneDrive or Explorer can hold the folder
+    # itself open, and removing it then fails with "Access is denied"
+    OUT.mkdir(exist_ok=True)
+    for p in OUT.iterdir():
+        shutil.rmtree(p) if p.is_dir() else p.unlink()
     for name, cols in PARQUET_COLUMNS.items():
         pd.read_parquet(SRC / name, columns=cols).to_parquet(OUT / name, index=False)
     missing = []
