@@ -32,13 +32,23 @@ Data: Amazon Reviews 2023 (McAuley Lab, UCSD), Electronics category, filtered to
 | --- | --- |
 | `pipeline/01_load_data.py` | Stream, filter, sample products by price quintile, reservoir-sample reviews, drop duplicates; `--append` adds products without renumbering |
 | `pipeline/02_tag_reviews.py` | Claude Haiku tags: value sentiment, price mention, up to 5 themes with polarity; pilot / hand-check / batch / retag-check |
-| `pipeline/03_build_index.py` | Local embeddings (BAAI/bge-small-en-v1.5 via fastembed) to `data/processed/review_embeddings.npz`; `qa.py` searches it with numpy (replaced Chroma 2026-10-02) |
+| `pipeline/03_build_index.py` | Local embeddings (BAAI/bge-small-en-v1.5 via fastembed) to `data/processed/review_embeddings.npz` (~1 hour; only needed when reviews are added or removed) |
 | `pipeline/04_check_prices.py` | Claude Haiku price plausibility check: normal price range, is-headphone; suspect rule in code; pilot / run / summary |
-| `price_overrides.csv` | Chris's hand-check decisions on the price check (committed; overrides verdict, is_headphone or exclude) |
+| `pipeline/05_app_data.py` | Build the slim `app_data/` for deployment and upload it to the private Hugging Face dataset repo |
 | `pipeline/check_products.py` | Quick look at sampled product titles by tier |
-| `qa.py` | Retrieval, cited answers (Claude Sonnet), price bands, `--bands`, `--eval` |
-| `data/processed/` | parquet outputs, `tags.jsonl` (source of truth for tags), summaries, hand-check CSVs, `qa_eval.md` |
+| `qa.py` | Retrieval (numpy search over the embeddings, filters, exclusions, 3-per-product cap), cited answers (Claude Sonnet), price bands, example-answer cache; `--bands`, `--eval`, `--cache-examples` |
+| `analytics.py` | Band statistics with product-level bootstrap ranges, theme net sentiment by band, overpriced-for-band products, suspect listings; `python analytics.py` prints them |
+| `app.py` | Streamlit app: Analytics and Ask the reviews tabs, guardrails, attribution footer |
+| `datasource.py` | Picks the data folder (`$REVIEW_DATA_DIR`, `data/processed`, or `app_data/`) and downloads `app_data/` from Hugging Face with checksum checks |
+| `price_overrides.csv` | Chris's hand-check decisions on the price check (committed; overrides verdict, is_headphone or exclude) |
+| `.streamlit/secrets.toml.example` | Names of the Streamlit secrets (`ANTHROPIC_API_KEY`, `HF_DATA_REPO`, `HF_TOKEN`); the real `secrets.toml` is git-ignored |
+| `README.md` | Public front page: question, findings, how the project ran, method |
+| `PLAYBOOK.md` | The repeatable method for AI projects, with evidence from this one |
+| `docs/TECHNICAL.md` | Pipeline, setup, commands, deployment, citation |
+| `docs/*.png` | README screenshots of the live app |
 | `PROJECT_LOG.md` | Decisions, issues, validation results, costs. **Update it after each phase.** |
+| `data/processed/` | Git-ignored. Parquet outputs, `tags.jsonl` (source of truth for tags), `price_checks.jsonl`, `review_embeddings.npz`, `example_answers.json`, hand-check CSVs |
+| `app_data/` | Git-ignored. The slim copy uploaded to Hugging Face (only the columns the app reads, no reviewer IDs) |
 
 ## Conventions and rules
 
