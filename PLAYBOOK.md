@@ -64,7 +64,15 @@ The aim is work that reads like business analysis that uses AI well, not a techn
 - Never store API keys in the project folder; set them per session. Add a `.gitignore` for keys, `.env` files, data and caches before anything goes to GitHub.
 - Make scripts resumable (skip finished work, back up before overwriting), and have them print costs and progress.
 
-## 8. Finish for the portfolio
+## 8. Explain it back before publishing
+
+- For every method choice, write a plain-language explanation: what it is, why it was chosen, and what the alternative was. If you can't explain it, you don't own it yet.
+- Write it as the questions an interviewer or stakeholder would ask, with a short answer and a longer one.
+- Get an outside review of the method, not just the code, and update the analysis and the explanations together.
+
+*In this project:* an outside review found the band ranges treated every review as independent, though reviews cluster within products. Switching to product-level ranges widened them (flagship 38–44% became 35–47%) and the headline held. The study guide then put every method choice into interview Q&A, including this one.
+
+## 9. Finish for the portfolio
 
 - Lead the README with 3-4 real findings with numbers, then method, validation and limitations.
 - State data limitations plainly.
