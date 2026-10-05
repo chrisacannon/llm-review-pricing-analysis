@@ -404,6 +404,16 @@ with tab_qa:
                                 client=anthropic.Anthropic(api_key=key, max_retries=3), **filters)
             except anthropic.AuthenticationError:
                 st.error("That API key was rejected. Check it and try again.")
+            except anthropic.BadRequestError as e:
+                # A Console spend limit returns 400 "You have reached your specified (workspace) API usage limits"
+                if "usage limits" not in str(e):
+                    st.error(f"Claude API error: {e}")
+                elif visitor_key:
+                    st.warning("Your API key has reached its spending limit. Raise the limit in the "
+                               "Anthropic Console, or remove your key to use the demo's free questions.")
+                else:
+                    st.warning("The demo's question budget is used up for this month. The example questions "
+                               "above still work (their answers are saved), or add your own API key to keep asking.")
             except anthropic.APIError as e:
                 st.error(f"Claude API error: {e}")
         if res is not None:
