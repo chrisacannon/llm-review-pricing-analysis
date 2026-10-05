@@ -15,7 +15,9 @@ Data: Amazon Reviews 2023 (McAuley Lab, UCSD), Electronics category, filtered to
 - Phase 4 step 1, price plausibility check: done (39 products excluded; see the log).
 - Phase 4 steps 2–3, Streamlit app Analytics and Q&A tabs (`streamlit run app.py`): done.
 - Phase 4 step 4 (guardrails) and deployment prep (option C, numpy search, private HF data repo, attribution): done. Code is public at github.com/chrisacannon/llm-review-pricing-analysis.
-- Next: **Chris deploys on share.streamlit.io** (main file `app.py`, Python 3.10, secrets per `.streamlit/secrets.toml.example`; the README's Deploying section has the steps), then Claude checks the live app as a visitor. Then Phase 5: rewrite the README around the findings, align its title with the app's ("Headphone Pricing Intelligence"), and use the repo name in the venv setup lines.
+- Phase 5 (deployment and write-up): done. Live app: https://llm-review-pricing-analysis.streamlit.app/ (Streamlit Community Cloud; any push to `main` redeploys it). README rewritten around the findings; method in `PLAYBOOK.md`; setup and deployment in `docs/TECHNICAL.md`.
+- **The project is complete.** Open item: Chris may add to the "What this suggests for pricing" paragraph in the README; it's his pricing judgment, so don't rewrite it without asking.
+- After any change to data, tags, price checks or example answers: rebuild and re-upload the app data (`pipeline/05_app_data.py build`, then `upload`), then reboot the app on Streamlit so it downloads the new copy.
 
 ## Environment (Windows, PowerShell)
 

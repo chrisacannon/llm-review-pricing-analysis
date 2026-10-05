@@ -2,13 +2,13 @@
 
 What was done, what went wrong, and what changed as a result. Newest entries at the bottom of each phase. Costs are actual Claude API spend.
 
-## Running totals (as of 2026-10-02)
+## Running totals (as of 2026-10-05)
 
 | Item | Value |
 | --- | --- |
 | Products / reviews | 429 products / 14,039 reviews (14,030 tagged) |
 | Excluded from band statistics | 39 products (price check + hand-check): 19 suspect listings, 19 not headphones, 1 multi-pack |
-| Claude API spend | ~$5.85 (pilot $0.33, prompt re-checks $0.08, batch $3.19, Q&A tests ~$0.18, supplement batch ~$1.50 estimated, price check $0.42, app Q&A tests $0.04, cached example answers $0.085) |
+| Claude API spend | ~$5.90 (pilot $0.33, prompt re-checks $0.08, batch $3.19, Q&A tests ~$0.18, supplement batch ~$1.50 estimated, price check $0.42, app Q&A tests $0.04, cached example answers $0.085, deployment tests ~$0.05) |
 | Tagging accuracy (hand-check, n=50) | value 96%, themes 86% (prompt v1); v3 fixed the main error patterns |
 
 ## Key decisions
@@ -169,3 +169,11 @@ Tagged 4,517 new reviews in one batch (prompt v3); 9 remain untagged. Index rebu
 **Chroma replaced with numpy search:** vectors were exported from Chroma, and search is now a matrix product with pandas filters. Results were identical on 18 test queries (IDs, order, distances, text); a search takes ~15 ms. The deploy shrinks from ~125 MB to 26 MB and drops a dependency. A full re-embed takes ~53 min on this laptop; the new build script reproduced the stored vectors exactly on a 512-review sample.
 
 **Issues:** the app-data build failed on OneDrive's folder lock, so it now empties the folder instead of deleting it. A real download from the private repo was tested locally by Chris.
+
+## Phase 5: deployment and write-up (2026-10-05)
+
+**Deployed** at https://llm-review-pricing-analysis.streamlit.app/ (Streamlit Community Cloud). The app's key is in its own Anthropic workspace with a monthly spend limit; a friendlier message covers that limit being reached. Visitor check after deployment: the data downloaded and the numbers matched, the cached example and citations worked, and one live question took 12 s, including the first model download (13 citations, 0 invalid, $0.019).
+
+**Code published** at github.com/chrisacannon/llm-review-pricing-analysis after a full-history check: no keys, no data files, and no review text (every review tested for 50-character passages in the history).
+
+**README rewritten for a hiring-manager first read:** the question, findings with a pricing interpretation, the phases as decisions and lessons, and the method, with setup and deployment moved to `docs/TECHNICAL.md`. The method is written up as `PLAYBOOK.md`: scoping and Phases 1–3 in Claude chat, the price check, app and deployment in Claude Code, handed off through `CLAUDE.md` and this log. The data note is framed as not re-hosting a public research dataset, out of respect for its source.
