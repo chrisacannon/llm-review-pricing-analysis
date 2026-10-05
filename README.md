@@ -14,15 +14,15 @@ Pricing teams usually see what sells, not why buyers feel a price was or wasn't 
 
 ## What the reviews say
 
-Among reviews that comment on value for money, the share calling the product overpriced:
+Among reviews that comment on value for money, the share calling the product overpriced. The 95% ranges allow for reviews clustering within products: each band's products were resampled 5,000 times.
 
 | Price band | Products | Reviews | Value verdicts | Overpriced | 95% range |
 | --- | ---: | ---: | ---: | ---: | --- |
-| Budget (under $25) | 116 | 3,664 | 1,229 | 21% | 19% to 24% |
-| Value ($25-49) | 81 | 2,734 | 857 | 20% | 17% to 23% |
-| Mid ($50-99) | 61 | 1,925 | 674 | 23% | 20% to 26% |
-| Premium ($100-199) | 61 | 2,091 | 660 | 32% | 29% to 36% |
-| Flagship ($200+) | 71 | 2,293 | 826 | 41% | 38% to 44% |
+| Budget (under $25) | 116 | 3,664 | 1,229 | 21% | 17% to 26% |
+| Value ($25-49) | 81 | 2,734 | 857 | 20% | 15% to 25% |
+| Mid ($50-99) | 61 | 1,925 | 674 | 23% | 17% to 29% |
+| Premium ($100-199) | 61 | 2,091 | 660 | 32% | 26% to 40% |
+| Flagship ($200+) | 71 | 2,293 | 826 | 41% | 35% to 47% |
 
 1. **Perceived value is flat up to $100, then drops twice.** Budget, value and mid-range buyers call their headphones overpriced at the same rate, about 21%. The share rises to 32% above $100 and 41% above $200: flagship buyers who talk about value are about twice as likely as budget buyers to say it wasn't worth it.
 2. **Above $100, buyers stop judging sound and start judging reliability.** Satisfaction with sound quality rises steadily with price, and durability complaints fade. But dropped connections and poor customer service turn sharply negative at flagship prices: the very problems buyers are paying a premium to avoid.

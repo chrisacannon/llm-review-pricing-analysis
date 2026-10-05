@@ -27,6 +27,8 @@ DATA = datasource.data_dir()  # data/processed locally; app_data/ when deployed
 BAND_ORDER = list(PRICE_BANDS)
 VERDICTS = ["negative", "neutral", "positive"]  # reviews that give a value verdict
 Z95 = 1.96
+BOOTSTRAP_RESAMPLES = 5000
+BOOTSTRAP_SEED = 7  # fixed so the published ranges are reproducible
 
 
 def band_of(price: float) -> str:
@@ -75,8 +77,30 @@ def load() -> dict[str, pd.DataFrame]:
 
 # ---------------------------------------------------------------- band level
 
+def band_bootstrap(reviews: pd.DataFrame, resamples: int = BOOTSTRAP_RESAMPLES,
+                   seed: int = BOOTSTRAP_SEED) -> dict[str, np.ndarray]:
+    """Overpriced share per band, recomputed on product-level resamples.
+
+    Reviews cluster within products (one product's reviews tend to agree), so treating every
+    review as independent makes the ranges too narrow. Each resample draws the band's products
+    with replacement and takes total overpriced verdicts / total value verdicts."""
+    rng = np.random.default_rng(seed)
+    out = {}
+    for band in BAND_ORDER:
+        b = reviews[reviews["band"] == band]
+        per = (b.assign(is_verdict=b["value_sentiment"].isin(VERDICTS),
+                        is_negative=b["value_sentiment"] == "negative")
+               .groupby("parent_asin")[["is_verdict", "is_negative"]].sum())
+        n, neg = per["is_verdict"].to_numpy(), per["is_negative"].to_numpy()
+        idx = rng.integers(0, len(per), size=(resamples, len(per)))
+        out[band] = neg[idx].sum(axis=1) / n[idx].sum(axis=1)
+    return out
+
+
 def band_summary(reviews: pd.DataFrame) -> pd.DataFrame:
-    """One row per band: sample sizes, share mentioning price, verdict mix, overpriced CI."""
+    """One row per band: sample sizes, share mentioning price, verdict mix, and a 95% range for
+    the overpriced share from the product-level bootstrap (band_bootstrap)."""
+    draws = band_bootstrap(reviews)
     rows = []
     for band in BAND_ORDER:
         b = reviews[reviews["band"] == band]
@@ -84,7 +108,7 @@ def band_summary(reviews: pd.DataFrame) -> pd.DataFrame:
         counts = v["value_sentiment"].value_counts()
         n = len(v)
         neg = int(counts.get("negative", 0))
-        lo, hi = wilson(neg, n)
+        lo, hi = np.percentile(draws[band], [2.5, 97.5])
         rows.append({
             "band": band, "label": band_label(band),
             "products": b["parent_asin"].nunique(), "reviews": len(b),

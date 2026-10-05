@@ -11,7 +11,7 @@ How to run, rebuild and deploy the project. For what it found and how it was run
 | 3. Check prices | Estimate each product's normal price; flag listings more than 2x above it (rule applied in code) and non-headphones; hand-checked decisions in `price_overrides.csv` | Claude Haiku 4.5 |
 | 4. Index | Embed every review locally; search is a matrix product over the vectors, with filters on the parquet files | BAAI/bge-small-en-v1.5 via fastembed |
 | 5. Answer | Retrieve the 15 closest reviews (at most 3 per product, excluded listings left out), answer with citations, verify each citation against what was retrieved | Claude Sonnet 5.5 |
-| 6. App | Band analytics with 95% intervals and sample sizes, topic heatmap, overpriced-for-band table with review drill-down, Q&A with guardrails | Streamlit, Altair |
+| 6. App | Band analytics with sample sizes and 95% ranges (product-level bootstrap, since reviews cluster within products), topic heatmap, overpriced-for-band table with review drill-down, Q&A with guardrails | Streamlit, Altair |
 
 ## Setup
 

@@ -177,3 +177,19 @@ Tagged 4,517 new reviews in one batch (prompt v3); 9 remain untagged. Index rebu
 **Code published** at github.com/chrisacannon/llm-review-pricing-analysis after a full-history check: no keys, no data files, and no review text (every review tested for 50-character passages in the history).
 
 **README rewritten for a hiring-manager first read:** the question, findings with a pricing interpretation, the phases as decisions and lessons, and the method, with setup and deployment moved to `docs/TECHNICAL.md`. The method is written up as `PLAYBOOK.md`: scoping and Phases 1–3 in Claude chat, the price check, app and deployment in Claude Code, handed off through `CLAUDE.md` and this log. The data note is framed as not re-hosting a public research dataset, out of respect for its source.
+
+## Review fix: confidence ranges by product, not by review (2026-10-05)
+
+**Issue (from an outside review):** the band ranges treated every review as independent (Wilson intervals). But reviews cluster within products: one product's reviews tend to agree, and flagship's 826 value verdicts come from only 66 products. That made the ranges too narrow.
+
+**Fix:** each band's range now comes from a bootstrap that resamples the band's products (5,000 resamples, fixed seed), computing the overpriced share as total overpriced verdicts / total value verdicts in each resample (`band_bootstrap` in `analytics.py`). Point estimates are unchanged. Per-product intervals in the overpriced-for-band table stay Wilson, since those are within one product. The app's chart caption, table and "How to read these numbers" now say the ranges allow for clustering.
+
+| Band | Overpriced | Old range (by review) | New range (by product) |
+| --- | ---: | --- | --- |
+| Budget | 21.3% | 19% to 24% | 17% to 26% |
+| Value | 19.8% | 17% to 23% | 15% to 25% |
+| Mid | 22.6% | 20% to 26% | 17% to 29% |
+| Premium | 32.3% | 29% to 36% | 26% to 40% |
+| Flagship | 40.9% | 38% to 44% | 35% to 47% |
+
+**The headline holds:** flagship's share is above mid's in every resample (100%), premium's above mid's in 98.4%, and flagship's above premium's in 96.0%; mid vs budget is 64%, consistent with "flat up to $100". The ranges match an independent recompute.

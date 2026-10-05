@@ -137,7 +137,10 @@ with tab_analytics:
             f"enough reviews; pooling bands together would misrepresent the category.\n"
             f"- **{n_ex} listings are excluded** (reseller markups, non-headphones, multi-packs); see "
             f"*Suspect listings* below.\n"
-            f"- Ranges in brackets are 95% confidence intervals.")
+            f"- **Ranges by band are 95% ranges that allow for reviews clustering within products.** One "
+            f"product's reviews tend to agree, so each band's range comes from resampling its products "
+            f"(5,000 times), not individual reviews. Ranges for single products, in the overpriced-for-band "
+            f"table, are 95% intervals on that product's own reviews.")
 
     # ------------------------------------------------ verdict by band
     col1, col2 = st.columns(2, gap="large")
@@ -146,7 +149,7 @@ with tab_analytics:
         neg_pct=summary.negative.map(pct))
     tooltip = [alt.Tooltip("label:N", title="Band"),
                alt.Tooltip("negative:Q", title="Overpriced", format=".1%"),
-               alt.Tooltip("ci:N", title="95% interval"),
+               alt.Tooltip("ci:N", title="95% range"),
                alt.Tooltip("verdicts:Q", title="Value verdicts", format=","),
                alt.Tooltip("reviews:Q", title="Reviews", format=","),
                alt.Tooltip("products:Q", title="Products")]
@@ -161,7 +164,8 @@ with tab_analytics:
         labels = base.mark_text(dy=-8, color=C["ink"], fontSize=12, fontWeight="bold").encode(
             y="negative_hi:Q", text="neg_pct:N")
         st.altair_chart(styled((bars + ci + labels).properties(height=300)), width="stretch")
-        st.caption("Whiskers: 95% interval. Hover a bar for sample sizes.")
+        st.caption("Whiskers: 95% range, allowing for reviews clustering within products. "
+                   "Hover a bar for sample sizes.")
 
     with col2:
         st.markdown("**Value verdict mix, by price band**")
@@ -200,7 +204,7 @@ with tab_analytics:
         "Good value": summary["positive"].map(pct),
         "Neutral": summary["neutral"].map(pct),
         "Overpriced": summary["negative"].map(pct),
-        "Overpriced, 95% interval": [f"{lo:.0%} to {hi:.0%}" for lo, hi in zip(summary.negative_lo, summary.negative_hi)],
+        "Overpriced, 95% range": [f"{lo:.0%} to {hi:.0%}" for lo, hi in zip(summary.negative_lo, summary.negative_hi)],
     })
     st.dataframe(table, hide_index=True, width="stretch")
 
