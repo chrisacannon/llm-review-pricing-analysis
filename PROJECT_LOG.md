@@ -193,3 +193,5 @@ Tagged 4,517 new reviews in one batch (prompt v3); 9 remain untagged. Index rebu
 | Flagship | 40.9% | 38% to 44% | 35% to 47% |
 
 **The headline holds:** flagship's share is above mid's in every resample (100%), premium's above mid's in 98.4%, and flagship's above premium's in 96.0%; mid vs budget is 64%, consistent with "flat up to $100". The ranges match an independent recompute.
+
+**Within-band price split (2026-10-05):** checked with product-level ranges; the direction slightly favors pricier products in budget and value (fewer "overpriced" verdicts in the higher-priced half), but the gap is not significant, so it was not added to the README.
