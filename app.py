@@ -59,34 +59,40 @@ DAILY_LIMIT = 100          # across all visitors, ~$2/day at ~$0.02 an answer; b
 MAX_QUESTION_CHARS = 500
 
 # ---------------------------------------------------------------- palette
-# Reference palette from the dataviz skill (validated light and dark steps).
-# Overpriced = red pole, good value = blue pole, neutral = gray midpoint.
-# surface = Streamlit's page background, used for the 2px gaps between adjacent fills.
-PALETTE = {
-    "light": {"surface": "#ffffff", "neg": "#e34948", "pos": "#2a78d6", "mid": "#f0efec", "ink": "#0b0b0b", "ink2": "#52514e",
-              "muted": "#898781", "grid": "#e1e0d9", "axis": "#c3c2b7"},
-    "dark": {"surface": "#0e1117", "neg": "#e66767", "pos": "#3987e5", "mid": "#383835", "ink": "#ffffff", "ink2": "#c3c2b7",
-             "muted": "#898781", "grid": "#2c2c2a", "axis": "#383835"},
-}
-theme_type = getattr(getattr(st.context, "theme", None), "type", None)
-C = PALETTE["dark" if theme_type == "dark" else "light"]
+# One palette that reads on both light and dark pages. Picking colors from st.context.theme
+# broke when a visitor switched themes after loading (white labels on a white page), because
+# switching doesn't rerun the script. Data colors are the dataviz skill's red/blue poles
+# (>= 4.5:1 on both page colors); chart text and lines are mid grays; gaps between fills are
+# transparent padding instead of page-colored strokes.
+C = {"neg": "#e34948", "pos": "#2a78d6", "neutral": "#9a9a9a", "mid": "#a6a6a6",
+     "ink": "#767676", "grid": "rgba(128,128,128,0.25)", "axis": "rgba(128,128,128,0.55)",
+     "cell_text": "#111111"}  # cells carry their own color, so their labels stay dark in both themes
 FONT = 'system-ui, -apple-system, "Segoe UI", sans-serif'
 
 
 def styled(chart: alt.Chart) -> alt.Chart:
     return (chart.configure(background="transparent", font=FONT)
             .configure_view(stroke=None)
-            .configure_axis(labelColor=C["ink2"], titleColor=C["ink2"], gridColor=C["grid"],
+            .configure_axis(labelColor=C["ink"], titleColor=C["ink"], gridColor=C["grid"],
                             domainColor=C["axis"], tickColor=C["axis"], labelFontSize=12, titleFontSize=12,
                             titleFontWeight="normal")
-            .configure_legend(labelColor=C["ink2"], titleColor=C["ink2"], labelFontSize=12, titleFontSize=12,
+            .configure_legend(labelColor=C["ink"], titleColor=C["ink"], labelFontSize=12, titleFontSize=12,
                               orient="top", title=None))
 
 
 # ---------------------------------------------------------------- data
 
+def code_version() -> str:
+    """Changes whenever the statistics code changes, so the cache below is rebuilt on redeploy.
+    (st.cache_data only watches load()'s own code, not the analytics module it calls.)"""
+    import hashlib
+    from pathlib import Path
+    files = [an.__file__, Path(an.__file__).with_name("qa.py")]
+    return hashlib.sha256(b"".join(Path(f).read_bytes() for f in files)).hexdigest()[:12]
+
+
 @st.cache_data
-def load():
+def load(version: str):
     d = an.load()
     pv = an.product_value(d["reviews"], d["products"])
     return {**d, "summary": an.band_summary(d["reviews"]), "pv": pv,
@@ -94,7 +100,7 @@ def load():
             "suspect": an.suspect_listings(d["products"])}
 
 
-d = load()
+d = load(code_version())
 summary = d["summary"]
 LABELS = list(summary["label"])  # band labels in price order
 
@@ -160,7 +166,7 @@ with tab_analytics:
         bars = base.mark_bar(color=C["neg"], cornerRadiusTopLeft=4, cornerRadiusTopRight=4, size=44).encode(
             y=alt.Y("negative:Q", title="Overpriced share", axis=alt.Axis(format="%", tickCount=5),
                     scale=alt.Scale(domain=[0, 0.5])))
-        ci = base.mark_rule(color=C["ink2"], strokeWidth=1.5).encode(y="negative_lo:Q", y2="negative_hi:Q")
+        ci = base.mark_rule(color=C["ink"], strokeWidth=1.5).encode(y="negative_lo:Q", y2="negative_hi:Q")
         labels = base.mark_text(dy=-8, color=C["ink"], fontSize=12, fontWeight="bold").encode(
             y="negative_hi:Q", text="neg_pct:N")
         st.altair_chart(styled((bars + ci + labels).properties(height=300)), width="stretch")
@@ -175,11 +181,11 @@ with tab_analytics:
             for name, x0, x1, share in [("Overpriced", -half - r.negative, -half, r.negative),
                                         ("Neutral", -half, half, r.neutral),
                                         ("Good value", half, half + r.positive, r.positive)]:
-                rows.append({"label": r.label, "verdict": name, "x0": x0, "x1": x1, "share": share,
+                gap = 0.004  # transparent gap between segments (in share units, ~2px)
+                rows.append({"label": r.label, "verdict": name, "x0": x0 + gap, "x1": x1 - gap, "share": share,
                              "verdicts": r.verdicts})
         mix = pd.DataFrame(rows)
-        chart = alt.Chart(mix).mark_bar(size=26, stroke=C["surface"],
-                                        strokeWidth=2).encode(
+        chart = alt.Chart(mix).mark_bar(size=26).encode(
             y=alt.Y("label:N", sort=LABELS, title=None, axis=alt.Axis(labelLimit=160)),
             x=alt.X("x0:Q", title="← overpriced · good value →",
                     axis=alt.Axis(format="%", labelExpr="format(abs(datum.value), '.0%')"),
@@ -187,7 +193,7 @@ with tab_analytics:
             x2="x1:Q",
             color=alt.Color("verdict:N", sort=["Overpriced", "Neutral", "Good value"],
                             scale=alt.Scale(domain=["Overpriced", "Neutral", "Good value"],
-                                            range=[C["neg"], C["axis"], C["pos"]])),
+                                            range=[C["neg"], C["neutral"], C["pos"]])),
             tooltip=[alt.Tooltip("label:N", title="Band"), alt.Tooltip("verdict:N", title="Verdict"),
                      alt.Tooltip("share:Q", title="Share", format=".1%"),
                      alt.Tooltip("verdicts:Q", title="Value verdicts", format=",")])
@@ -219,20 +225,21 @@ with tab_analytics:
     order = (tb.groupby("theme_name")["mentions"].sum().sort_values(ascending=False).index.tolist())
     tb["prev_txt"] = tb["prevalence"].map(lambda v: f"{v:.0%}" if v >= 0.005 else "<1%")
     heat = alt.Chart(tb).encode(
-        x=alt.X("label:N", sort=LABELS, title=None, axis=alt.Axis(labelAngle=0, orient="top", labelLimit=140)),
-        y=alt.Y("theme_name:N", sort=order, title=None, axis=alt.Axis(labelLimit=200)),
+        x=alt.X("label:N", sort=LABELS, title=None, axis=alt.Axis(labelAngle=0, orient="top", labelLimit=140),
+                scale=alt.Scale(paddingInner=0.04)),
+        y=alt.Y("theme_name:N", sort=order, title=None, axis=alt.Axis(labelLimit=200),
+                scale=alt.Scale(paddingInner=0.08)),
         tooltip=[alt.Tooltip("theme_name:N", title="Topic"), alt.Tooltip("label:N", title="Band"),
                  alt.Tooltip("prevalence:Q", title="Share of reviews", format=".1%"),
                  alt.Tooltip("net:Q", title="Net sentiment", format="+.2f"),
                  alt.Tooltip("mentions:Q", title="Mentions", format=","),
                  alt.Tooltip("positive:Q", title="Positive"), alt.Tooltip("negative:Q", title="Negative"),
                  alt.Tooltip("mixed:Q", title="Mixed")])
-    cells = heat.mark_rect(stroke=C["surface"], strokeWidth=2,
-                           cornerRadius=3).encode(
+    cells = heat.mark_rect(cornerRadius=3).encode(
         color=alt.Color("net:Q", title="Net sentiment",
                         scale=alt.Scale(domain=[-1, 0, 1], range=[C["neg"], C["mid"], C["pos"]], interpolate="rgb"),
                         legend=alt.Legend(format="+.1f", orient="right", gradientLength=180)))
-    text = heat.mark_text(fontSize=12, color=C["ink"]).encode(text="prev_txt:N")
+    text = heat.mark_text(fontSize=12, color=C["cell_text"]).encode(text="prev_txt:N")
     st.altair_chart(styled((cells + text).properties(height=460)), width="stretch")
     st.caption("Sound quality and value-for-money sentiment move in opposite directions as price rises; "
                "connectivity and customer service turn negative at flagship prices. "
