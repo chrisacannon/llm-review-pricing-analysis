@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Context for Claude Code. Read this, then `PROJECT_LOG.md` (what happened and why) and `README.md` (how to run each phase).
+Context for Claude Code. Read this, then `PROJECT_LOG.md` (what happened and why), `README.md` (findings and overview) and `docs/TECHNICAL.md` (setup, commands and deployment).
 
 ## What this is
 
@@ -24,7 +24,7 @@ Data: Amazon Reviews 2023 (McAuley Lab, UCSD), Electronics category, filtered to
 - Project folder is inside OneDrive; the virtual environment is deliberately **outside** it: `$HOME\venvs\review-pricing-intel`. Activate with `& $HOME\venvs\review-pricing-intel\Scripts\Activate.ps1`.
 - API key: `$env:ANTHROPIC_API_KEY`, set per session (may be loaded from a file outside OneDrive). Never write the key into the project folder or any committed file.
 - Embedding model cache: `~\.cache\fastembed` (outside OneDrive).
-- Chris is comfortable with Excel and Power BI, newer to Python and PowerShell. Give PowerShell commands one per code block; pasting several lines at once has caused problems.
+- Give PowerShell commands one per code block; pasting several lines at once has caused problems.
 
 ## Layout
 
@@ -58,7 +58,9 @@ Data: Amazon Reviews 2023 (McAuley Lab, UCSD), Electronics category, filtered to
 - Reviews comparing several products can be tagged on the other products' verdicts (rare).
 - 19 non-headphone items (stands, cases, cables, beanies, a car radio) are in the sample; the price check flags them and they are excluded from band statistics.
 
-## Phase 4 spec: Streamlit app
+## Phase 4 spec (completed)
+
+Kept for reference; `PROJECT_LOG.md` records what was built and what changed along the way.
 
 Goal from the plan: a deployed Streamlit app with a price-band vs value-sentiment chart, an overpriced-product table, and a Q&A panel.
 
