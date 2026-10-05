@@ -43,14 +43,23 @@ The aim is work that reads like business analysis that uses AI well, not a techn
 
 *In this project:* the top quintile ran from $80 to $999, mixing gaming headsets with Bang & Olufsen, so the analysis uses five dollar bands. Flagship started with 18 products and was deepened to 88 with append pulls that never renumber review IDs.
 
-## 5. Keep a project log from day one
+## 5. Check the statistics before claiming the headline
+
+- Records cluster within entities (many reviews per product), so compute ranges by product, not by review.
+- Check that a finding isn't driven by a few products.
+- Recompute the headline numbers independently before publishing.
+- Check any within-segment claim with the same method.
+
+*In this project:* product-level ranges widened flagship from 38-44% to 35-47%, and the headline held. A within-band price check was run, wasn't significant, and stayed out of the README.
+
+## 6. Keep a project log from day one
 
 - Record running totals (data size, API spend, accuracy), each decision with its reason, each issue and its fix, validation results, actual costs and run times, and emerging findings.
 - Separate files by job: README is the public front page, the plan doc holds intent and open decisions, the log holds what actually happened.
 
 *In this project:* [`PROJECT_LOG.md`](PROJECT_LOG.md). It is also the interview story: the hand-check passed, but a consistency rule showed the headline metric was overstated.
 
-## 6. Use the right tool for each stage
+## 7. Use the right tool for each stage
 
 - **Chat:** scoping, the plan, judgment calls, interpreting results, reviewing outputs, the write-up.
 - **Coding agent (Claude Code):** build-heavy stretches with many edit-run-fix cycles, testing against real data and APIs, git, GitHub and deployment.
@@ -58,13 +67,13 @@ The aim is work that reads like business analysis that uses AI well, not a techn
 
 *In this project:* planning and Phases 1-3 ran from chat; the app, price check and deployment were built in Claude Code, which started from [`CLAUDE.md`](CLAUDE.md) and the log.
 
-## 7. Practical setup
+## 8. Practical setup
 
 - Keep virtual environments and model caches outside synced folders such as OneDrive.
 - Never store API keys in the project folder; set them per session. Add a `.gitignore` for keys, `.env` files, data and caches before anything goes to GitHub.
 - Make scripts resumable (skip finished work, back up before overwriting), and have them print costs and progress.
 
-## 8. Explain it back before publishing
+## 9. Explain it back before publishing
 
 - For every method choice, write a plain-language explanation: what it is, why it was chosen, and what the alternative was. If you can't explain it, you don't own it yet.
 - Write it as the questions an interviewer or stakeholder would ask, with a short answer and a longer one.
@@ -72,7 +81,7 @@ The aim is work that reads like business analysis that uses AI well, not a techn
 
 *In this project:* an outside review found the band ranges treated every review as independent, though reviews cluster within products. Switching to product-level ranges widened them (flagship 38–44% became 35–47%) and the headline held. The study guide then put every method choice into interview Q&A, including this one.
 
-## 9. Finish for the portfolio
+## 10. Finish for the portfolio
 
 - Lead the README with 3-4 real findings with numbers, then method, validation and limitations.
 - State data limitations plainly.
