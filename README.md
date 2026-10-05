@@ -1,140 +1,73 @@
-# Review-Informed Pricing Intelligence
+# Headphone Pricing Intelligence
 
-For one Amazon product category: where is price out of line with perceived value, and what do customers say at each price tier?
+**Where is headphone price out of line with perceived value, and what do customers say at each price point?**
 
-Python pipeline + Streamlit app using Claude for review tagging and Q&A. Data: [Amazon Reviews 2023](https://huggingface.co/datasets/McAuley-Lab/Amazon-Reviews-2023) (McAuley Lab, UCSD).
+An **LLM-powered pricing analysis** of 12,700 Amazon headphone reviews: Claude reads every review for what buyers say about value for money, and an app lets anyone explore the results and question the reviews directly.
 
-## Setup
+**[Open the live app](https://llm-review-pricing-analysis.streamlit.app/)**
 
-Create the virtual environment outside any synced folder (OneDrive, Dropbox, iCloud): syncing thousands of package files slows everything down and can corrupt the environment. Then run `pip install` from inside the project folder.
+![Analytics tab: overpriced share by price band, value verdict mix, and sample sizes](docs/analytics.png)
 
-Windows (PowerShell):
+## The question
 
-```powershell
-python -m venv $HOME\venvs\review-pricing-intel
-& $HOME\venvs\review-pricing-intel\Scripts\Activate.ps1
-pip install -r requirements.txt
-```
+Pricing teams usually see what sells, not why buyers feel a price was or wasn't worth it. Reviews say why, but at a scale no one can read. This project asks, at the level of a whole category: **at which price points do buyers start to feel they overpaid, and what drives that feeling?** It treats price the way a portfolio would be managed, in bands from budget to flagship, rather than product by product.
 
-Mac/Linux:
+## What the reviews say
 
-```bash
-python -m venv ~/venvs/review-pricing-intel
-source ~/venvs/review-pricing-intel/bin/activate
-pip install -r requirements.txt
-```
+Among reviews that comment on value for money, the share calling the product overpriced:
 
-Open a new terminal later? `cd` into the project folder and run the activate line again.
+| Price band | Products | Reviews | Value verdicts | Overpriced | 95% range |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Budget (under $25) | 116 | 3,664 | 1,229 | 21% | 19% to 24% |
+| Value ($25-49) | 81 | 2,734 | 857 | 20% | 17% to 23% |
+| Mid ($50-99) | 61 | 1,925 | 674 | 23% | 20% to 26% |
+| Premium ($100-199) | 61 | 2,091 | 660 | 32% | 29% to 36% |
+| Flagship ($200+) | 71 | 2,293 | 826 | 41% | 38% to 44% |
 
-## Phase 1: load and sample the data
+1. **Perceived value is flat up to $100, then drops twice.** Budget, value and mid-range buyers call their headphones overpriced at the same rate, about 21%. The share rises to 32% above $100 and 41% above $200: flagship buyers who talk about value are about twice as likely as budget buyers to say it wasn't worth it.
+2. **Above $100, buyers stop judging sound and start judging reliability.** Satisfaction with sound quality rises steadily with price, and durability complaints fade. But dropped connections and poor customer service turn sharply negative at flagship prices: the very problems buyers are paying a premium to avoid.
+3. **34 products are priced above their band's typical price and draw more "overpriced" verdicts than their band average;** for 15, the gap holds up even allowing for small samples. The app lists them with the reviews behind each one.
+4. **Listed prices had to be checked before they could be trusted.** 39 of 429 sampled listings were set aside: reseller markups (a ~$20 Sony earbud listed at $803), items that weren't headphones, and multi-packs. Removing them raised flagship's overpriced share from 38% to 41%; the mispriced listings had been diluting the real signal.
 
-```bash
-# Small category: files download once (~1.2 GB) and are cached for reruns
-python pipeline/01_load_data.py --category Musical_Instruments
+**What this suggests for pricing:** below $100, reviews show no value penalty for charging more within the range, so price can follow features. Above $100, a higher price has to be backed by reliability and support, not better sound alone: sound is already where flagship buyers are happiest, and the complaints that drive "not worth it" are dropped connections and poor service.
 
-# Sub-category inside a huge file: stream instead of saving it
-python pipeline/01_load_data.py --category Electronics --keyword "headphone|earbud" --stream
-```
+## Ask the reviews
 
-Outputs in `data/processed/`:
+![Ask the reviews tab: example questions, filters and the free-question counter](docs/ask-the-reviews-1.png)
 
-| File | Contents |
-| --- | --- |
-| `products.parquet` | Sampled products: price, rating, store, price quintile, reviews sampled |
-| `reviews.parquet` | Sampled reviews with a stable `review_id` used for citations later |
-| `summary.json` | Counts dropped at each filter, price distribution, rating mix |
+![An answer with citations, and one cited review opened](docs/ask-the-reviews-2.png)
 
-Useful flags: `--min-ratings` (default 30), `--max-products` (300), `--reviews-per-product` (60), `--min-price`, `--max-price`, `--seed`.
+The second tab answers questions in plain language ("What do flagship buyers complain about?"), filtered by price band, topic, verdict or star rating. Every answer cites the reviews it draws on, and each citation opens the review itself, so nothing has to be taken on trust.
 
-To add more products to an existing sample (e.g. to deepen one price band), use `--append`: products you already have are skipped, review IDs continue where they left off, and the previous files are backed up first. Then tag only the new reviews with `batch-submit` (without `--all`) and rebuild the index.
+## How the project ran
 
-```powershell
-python pipeline\01_load_data.py --category Electronics --category-match "Headphones & Earbuds" --min-price 200 --max-price 1000 --max-products 80 --append --stream
-```
+| Phase | What was done | What was learned or decided |
+| --- | --- | --- |
+| 1. Scope and data | Framed the question as category-level pricing strategy. Chose real Amazon reviews over synthetic ones, and sampled products across the full price range. | The first pull matched the word "headphone" and was nearly 60% cases, cables and ear pads. Filtering by Amazon's category instead fixed it. |
+| 2. AI reading of reviews | Claude read every review for its value-for-money verdict and the topics it raises. | A hand-check of 50 reviews found 96% accuracy on value verdicts. A built-in consistency check then caught errors the hand-check missed; without it, the "overpriced" share would have been overstated. |
+| 3. Search and Q&A | Made the reviews searchable and had Claude answer questions with citations. | Equal-sized price groups lumped $80 gaming headsets with $999 audiophile gear, so the analysis moved to dollar bands the way the category is merchandised. Flagship was too thin (18 products), so targeted extra pulls deepened it to 88; after the price check in Phase 4 set aside 17 bad listings, 71 remain in the statistics. |
+| 4. Price check and app | Had Claude estimate each product's normal price to catch bad listings, then built the app. | Claude's own judgment flagged prices only 10% above normal, so the cutoff (2x) became a fixed rule. "Should be a $10 item" is an opinion, not a price, so complaints don't count as evidence: otherwise the check would erase the very signal being measured. Close calls were decided by hand. |
+| 5. Publish | Checked the data's terms, added safeguards to the public demo, deployed. | The dataset grants no explicit right to redistribute review text, so this repository holds code only. The demo caps questions per visitor and runs on a spend-limited key. |
 
-Duplicate reviews (same product and text, by the same user or 40+ characters long) are removed on every run.
+All of it cost under $6 in AI usage. The [project log](PROJECT_LOG.md) has every decision, issue and fix, with costs and validation results.
 
-Products are sampled evenly across price quintiles so every tier is represented. Reviews are reservoir-sampled per product, so they aren't biased toward the start of the file.
+## How this was built
 
-## Phase 2: tag reviews with Claude
+The project follows a repeatable method for AI work, written up as **[a playbook](PLAYBOOK.md)**:
 
-Each review gets a value-for-money sentiment, a price-mention flag, and up to five themes (sound quality, comfort, battery, connectivity, appearance, etc.) with polarity. Uses Claude Haiku 4.5, 25 reviews per request.
+- **Start in conversation, move to an AI coding agent for the heavy build.** Scoping, the analysis plan and Phases 1-3 (data, AI reading of reviews, search) ran in conversation with Claude. The price check, the app and deployment, which needed many build-test-fix cycles, moved to Claude Code, handed off through a written brief ([`CLAUDE.md`](CLAUDE.md)) covering the purpose, rules and next steps.
+- **Pilot before spending, check before scaling.** Every AI step ran on a small sample first, with its cost and results reviewed before the full run, and its output was checked against human judgment.
+- **Keep a decision log.** [`PROJECT_LOG.md`](PROJECT_LOG.md) records what was done, what went wrong and what changed as a result. It doubles as the handoff between work sessions.
 
-```powershell
-python pipeline\02_tag_reviews.py pilot --n 500        # standard API, ~2 min
-python pipeline\02_tag_reviews.py export-check --n 50  # hand_check.csv for review in Excel
-python pipeline\02_tag_reviews.py batch-submit         # everything else, Batch API (half price)
-python pipeline\02_tag_reviews.py batch-collect --wait
-```
+## Data and limitations
 
-Resumable: already-tagged reviews are skipped, and missed ones can be resubmitted. Outputs: `tags.jsonl` (raw log), `review_tags.parquet`, `review_themes.parquet`.
+The reviews come from **Amazon Reviews 2023**, a public research dataset from the McAuley Lab at UC San Diego ([dataset](https://huggingface.co/datasets/McAuley-Lab/Amazon-Reviews-2023); Hou et al., *Bridging Language and Items for Retrieval and Recommendation*, [arXiv:2403.03952](https://arxiv.org/abs/2403.03952), 2024). Out of respect for the source, this repository doesn't re-host the review text: the app loads its working copy from separate storage, shows short excerpts attributed by review ID, and anyone can rebuild the sample from the original dataset with the included pipeline. A non-commercial portfolio project, not affiliated with Amazon or the McAuley Lab.
 
-## Phase 3: search index and Q&A
+- **Reviews, not sales.** The overpriced share measures what reviewers say, among the third who comment on value. It isn't a measure of demand or price sensitivity.
+- **Prices are a single snapshot**, with no price history; what a reviewer paid can differ from the listing.
+- **A sample, through September 2023:** 429 products, deliberately deeper in the higher bands, so results are reported per band.
+- **AI tags are good, not perfect:** about 96% accurate on value verdicts in the hand-check, lower on topics.
 
-Reviews are embedded locally with `BAAI/bge-small-en-v1.5` (via fastembed, no API cost) and saved as one vector per review (`review_embeddings.npz`, ~22 MB); search is a matrix product, with filters for price band, stars, value verdict and theme. Claude Sonnet answers questions from the retrieved reviews only, citing review IDs, and every citation is checked against what was actually retrieved.
+## For developers
 
-```powershell
-python pipeline\03_build_index.py     # a few minutes; first run downloads the model (~130 MB)
-python qa.py --bands                   # products and reviews per price band
-python qa.py "What do buyers of flagship headphones complain about?" --band flagship
-python qa.py --eval                    # 10 test questions -> data/processed/qa_eval.md
-```
-
-Filters: `--band budget|value|mid|premium|flagship` (under $25, $25-49, $50-99, $100-199, $200+; thresholds in `qa.py`), `--tier 1-5` (equal-count price quintiles), `--min-price`, `--max-price`, `--value positive|negative|neutral|not_mentioned`, `--theme comfort_fit` (repeatable), `--min-rating`, `--max-rating`.
-
-## Phase 4: price check and app
-
-Listed prices are a single snapshot, and some are reseller markups (a ~$20 earbud at $803). Claude Haiku estimates each product's normal price; listings more than twice that, non-headphones and hand-checked cases are excluded from band statistics and shown separately.
-
-```powershell
-python pipeline\04_check_prices.py pilot     # known problem listings + a sample per band
-python pipeline\04_check_prices.py run       # everything else (~$0.40)
-python pipeline\04_check_prices.py summary   # rebuild after editing price_overrides.csv
-```
-
-The Streamlit app's Analytics tab shows the value verdict mix by band (with 95% intervals and sample sizes), what buyers praise and complain about as price rises, products overpriced for their band with their reviews, and the excluded listings. The Ask the reviews tab answers questions from the most relevant reviews with checked citations; example answers are cached (`python qa.py --cache-examples`), and visitors get 5 questions per session on the app's key or unlimited with their own.
-
-```powershell
-streamlit run app.py
-python analytics.py                          # the same numbers, printed
-```
-
-## Deploying
-
-The code is public; the review data is not. The app's data (~26 MB: parquet files, review embeddings, cached example answers) lives in a **private** Hugging Face dataset repo, and the app downloads it on first start, checking every file against a manifest of checksums.
-
-```powershell
-python pipeline\05_app_data.py build                                   # slim copy in app_data/ (git-ignored)
-python pipeline\05_app_data.py upload --repo your-username/your-repo   # needs $env:HF_TOKEN with write access
-```
-
-On Streamlit Community Cloud, set the secrets shown in `.streamlit/secrets.toml.example`: `ANTHROPIC_API_KEY`, `HF_DATA_REPO` and a read-only `HF_TOKEN`. To rehearse locally, put the same values in `.streamlit/secrets.toml` (git-ignored) and point `$env:REVIEW_DATA_DIR` at an empty folder so the app has to download.
-
-## Data and attribution
-
-Reviews and product data come from **Amazon Reviews 2023**, collected by the McAuley Lab at UC San Diego ([dataset](https://huggingface.co/datasets/McAuley-Lab/Amazon-Reviews-2023), [project site](https://amazon-reviews-2023.github.io/)). This project uses a sample of the Electronics category: products under "Headphones & Earbuds", reviews through September 2023.
-
-> Yupeng Hou, Jiacheng Li, Zhankui He, An Yan, Xiusi Chen, Julian McAuley. *Bridging Language and Items for Retrieval and Recommendation.* arXiv:2403.03952, 2024.
-
-```bibtex
-@article{hou2024bridging,
-  title={Bridging Language and Items for Retrieval and Recommendation},
-  author={Hou, Yupeng and Li, Jiacheng and He, Zhankui and Yan, An and Chen, Xiusi and McAuley, Julian},
-  journal={arXiv preprint arXiv:2403.03952},
-  year={2024}
-}
-```
-
-How the review text is handled: the dataset states no license for it, so this repository contains code only. The app shows short review excerpts, each attributed by review ID, as evidence for its analysis; the full sample is kept in a private repo and is not redistributed. Reviewer IDs are dropped from the app's data. This is a non-commercial portfolio project, not affiliated with or endorsed by Amazon or the McAuley Lab.
-
-Value tags, price checks and answers are generated by Claude (Anthropic): Haiku 4.5 for tagging and price checks, Sonnet 5.5 for answers.
-
-## Limitations
-
-- Price is a single snapshot from when the data was collected; there is no price history.
-- Reviews run through September 2023.
-- Price ranges (e.g. "12.99 - 19.99") are dropped as ambiguous.
-- Some listings are third-party resellers with marked-up prices (e.g. a ~$20 Sony earbud listed at $803).
-- Reviews comparing several products can get value tags based on the other products.
-
-See PROJECT_LOG.md for decisions, data issues and validation results.
+Setup, the pipeline, commands, deployment and the full citation are in **[docs/TECHNICAL.md](docs/TECHNICAL.md)**.
