@@ -472,9 +472,9 @@ with tab_qa:
                f".cite-card{{border:1px solid {C['grid']};border-radius:8px;margin:0 0 6px;padding:8px 12px;"
                f"scroll-margin-top:80px}}"
                f".cite-head{{cursor:pointer;display:block;font-size:0.9rem}}"
-               f".cite-head .meta{{color:{C['ink2']}}}"
+               f".cite-head .meta{{color:{C['ink']}}}"
                f".cite-body{{display:none;margin-top:8px;font-size:0.9rem;line-height:1.5}}"
-               f".cite-body .sub{{color:{C['ink2']};font-size:0.8rem;margin-bottom:6px}}"
+               f".cite-body .sub{{color:{C['ink']};font-size:0.8rem;margin-bottom:6px}}"
                f".cite-card:target{{border-color:{C['pos']}}}"
                f".cite-card:target .cite-body,.cite-toggle:checked+.cite-card .cite-body{{display:block}}</style>")
         cards = []

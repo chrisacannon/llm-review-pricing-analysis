@@ -195,3 +195,7 @@ Tagged 4,517 new reviews in one batch (prompt v3); 9 remain untagged. Index rebu
 **The headline holds:** flagship's share is above mid's in every resample (100%), premium's above mid's in 98.4%, and flagship's above premium's in 96.0%; mid vs budget is 64%, consistent with "flat up to $100". The ranges match an independent recompute.
 
 **Within-band price split (2026-10-05):** checked with product-level ranges; the direction slightly favors pricier products in budget and value (fewer "overpriced" verdicts in the higher-priced half), but the gap is not significant, so it was not added to the README.
+
+## Maintenance
+
+**Q&A citation cards crash (2026-10-28):** asking a question in the live app failed with `KeyError: 'ink2'` while drawing the citation cards. The 2026-10-05 palette change (one palette for light and dark themes) removed the `ink2` gray, but the citation cards still used it; the cached example answers don't draw these cards, so the post-change checks missed it. Fix: the cards use `ink`, the gray the rest of the app uses. Lesson: after any visual change, ask the live app one real question and open a citation.
